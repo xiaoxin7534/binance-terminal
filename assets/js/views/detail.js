@@ -280,8 +280,6 @@ export class DetailPanel {
         <h4>盘口<span class="line"></span><button class="book-tag book-step" data-role="step" title="价格合并粒度">${this.stepLabel()}</button></h4>
         <div class="book" data-role="book"><div class="muted" style="padding:8px 4px">等待盘口数据…</div></div>
       </div>
-      </div>
-      <div class="dt-col">
       <div class="dt-section" style="border-bottom:none">
         <h4>最近成交<span class="line"></span></h4>
         <div class="trade-head"><span>价格</span><span>数量</span><span>时间</span></div>
