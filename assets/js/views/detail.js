@@ -94,12 +94,25 @@ export class DetailPanel {
         if (!this.visible()) return;
         this.loadPerp(this.symbol);
       }, 20000);
-      // 合约 WS 网关不提供 depth 流，盘口/逐笔只能靠 REST 轮询
+      // 合约盘口走 DepthWorker 的 WS 推送（100ms），逐笔走 aggTrade；
+      // REST 只做兜底：万一 WS 断了，30 秒补一次盘口，不至于整块空着
       this.bookTimer = setInterval(() => {
         if (!this.visible()) return;
-        this.loadSnapshot(this.symbol);
-      }, 4000);
+        this.reloadBook();
+      }, 30000);
     }
+  }
+
+  /** 兜底：只补盘口，不动已经累积的逐笔 */
+  async reloadBook() {
+    const sym = this.symbol;
+    if (!sym) return;
+    try {
+      const d = await api.depth(sym, 20);
+      if (sym !== this.symbol) return;
+      this.lastDepth = { s: sym, b: d.b || [], a: d.a || [] };
+      this.renderBook();
+    } catch (e) { /* 网络抖动忽略 */ }
   }
 
   /** 切回本视图时补一次数据：面板隐藏期间轮询是停的，不补会显示旧价 */

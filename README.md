@@ -163,7 +163,7 @@ python server.py --open
 | 现货行情、K线增量、盘口、逐笔 | WebSocket `data-stream.binance.vision` |
 | 现货 K线历史、盘口快照 | REST `data-api.binance.vision` |
 | 合约行情（663 个 U 本位永续） | WebSocket `fstream.binance.com/market/stream`（需代理） |
-| 合约 K线/盘口/逐笔 | REST `www.binance.com/fapi/...`（需代理） |
+| 合约 K线/盘口/逐笔 | WebSocket `fstream.binance.com/stream` + `/market/stream`（需代理） |
 | 资金费率 / 标记价 / 指数价 | `www.binance.com/fapi/v1/premiumIndex`（一次拿全部 945 个合约，60 秒轮询） |
 | 持仓量 | `www.binance.com/fapi/v1/openInterest?symbol=X`（按需，选中才拉） |
 | 多空账户比 | `www.binance.com/futures/data/globalLongShortAccountRatio`（按需） |
@@ -175,7 +175,8 @@ python server.py --open
 > 网页版用的 `/market/stream` 才行。所以合约数据全部走这两条通道。
 >
 > 但这条合约 WS 网关只挂了部分流：`!ticker@arr`、`@kline_*`、`@aggTrade` 都正常，
-> **`@depth` 系列一个数据帧都不给**（也不报错）。所以永续的盘口靠 REST 每 4 秒轮询，
+> **注意区分两条合约 WS 入口**：`/market/stream` 有全市场 ticker 但没有 depth；
+> 标准 `/stream` 端点有 `@depth20@100ms`。永续盘口走后者，100ms 一帧实时推送，
 > 而不是像现货那样 100ms 推送。
 
 几个刻意的设计（都是为了在你这个网络环境下好用）：

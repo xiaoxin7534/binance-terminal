@@ -53,7 +53,8 @@ REST_HOST = "data-api.binance.vision"
 WS_HOST = "data-stream.binance.vision"
 FAPI_HOST = "www.binance.com"           # 合约 REST（网页版网关，fapi.binance.com 被 451）
 FWS_HOST = "fstream.binance.com"        # 合约 WebSocket（需要代理）
-FWS_PATH = "/market/stream"             # 网页版路径，标准 /stream 收不到数据
+FWS_PATH = "/market/stream"             # 网页版路径：有 !ticker@arr，但**没有 depth**
+FWS_DEPTH_PATH = "/stream"              # 标准合并流端点：depth 走这里（见 DepthWorker）
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BinanceTerminal/1.0"
 
 TOP_TICKER_STREAMS = 260        # rebalance 兜底保留的成交额前 N
@@ -915,6 +916,113 @@ class FuturesWorker(threading.Thread):
 
 
 FUTURES = None
+FUT_DEPTH = None
+
+
+class DepthWorker(threading.Thread):
+    """fstream.binance.com/stream —— 合约盘口（实时）
+
+    之前文档里「合约没有 depth 流」的结论只对 `/market/stream`（网页版网关）成立。
+    标准合并流端点 `/stream` 是给 depth 的，实测 `@depth20@100ms` 稳定 100ms 一帧，
+    而且这一条不需要 `!ticker@arr`，所以单独开一条连接，只订阅当前正在看的那个合约。
+
+    优先级：`depth_symbol` 是永续时才订阅；现货盘口走现货流（StreamWorker）。
+    """
+
+    def __init__(self, hub):
+        super().__init__(daemon=True)
+        self.hub = hub
+        self.conn = None
+        self.applied = set()
+        self.state = "init"      # init / ok / off
+
+    def run(self):
+        backoff = 5.0
+        while True:
+            try:
+                self._session()
+                backoff = 5.0
+            except Exception as e:      # noqa: BLE001
+                self.state = "off"
+                log("合约盘口流断开: %s %s" % (type(e).__name__, e))
+            finally:
+                self.applied = set()
+                if self.conn:
+                    self.conn.close()
+                    self.conn = None
+            time.sleep(backoff)
+            backoff = min(backoff * 1.6, 60)
+
+    def _wanted(self):
+        with self.hub.lock:
+            sym = self.hub.depth_symbol
+        if sym and sym.endswith("@f"):
+            return {sym[:-2].lower() + "@depth20@100ms"}
+        return set()
+
+    def _sync_subs(self):
+        want = self._wanted()
+        if want == self.applied:
+            return
+        add = sorted(want - self.applied)
+        rem = sorted(self.applied - want)
+        if rem:
+            self.conn.send_text(json.dumps({"method": "UNSUBSCRIBE", "params": rem, "id": 810}))
+        if add:
+            self.conn.send_text(json.dumps({"method": "SUBSCRIBE", "params": add, "id": 110}))
+        self.applied = want
+
+    def _session(self):
+        if not SOCKS_PROXY:
+            self.state = "off"
+            raise ConnectionError("未检测到代理")
+        log("连接币安合约盘口流...")
+        self.conn = WSConn(FWS_HOST, FWS_DEPTH_PATH, timeout=20, use_proxy=True)
+        self.state = "ok"
+        log("合约盘口流已连接")
+        last_ping = time.time()
+        last_sync = 0.0
+        while True:
+            now = time.time()
+            if now - last_sync > 1.0:
+                self._sync_subs()
+                last_sync = now
+            if now - last_ping > 150:
+                self.conn._send_frame(0x9, b"hb")
+                last_ping = now
+            fr = self.conn.recv_frame(0.5)
+            if fr is None:
+                continue
+            op, payload = fr
+            if op == 0x9:
+                self.conn._send_frame(0xA, payload)
+                continue
+            if op == 0xA:
+                continue
+            if op == 0x8:
+                raise ConnectionError("server closed")
+            if op not in (0x1, 0x2):
+                continue
+            try:
+                msg = json.loads(payload)
+            except Exception:       # noqa: BLE001
+                continue
+            self._dispatch(msg)
+
+    def _dispatch(self, msg):
+        data = msg.get("data") if isinstance(msg, dict) and "data" in msg else msg
+        if not isinstance(data, dict):
+            return
+        b, a, s = data.get("b"), data.get("a"), data.get("s")
+        if not b or not a or not s:
+            return                      # 订阅确认 / 心跳之类的消息
+        # 和 REST /api/depth 保持同一种形状：[[价格, 数量], ...]，数字不是字符串
+        self.hub.broadcast({
+            "t": "d",
+            "s": s + "@f",
+            "b": [[float(p), float(q)] for p, q in b],
+            "a": [[float(p), float(q)] for p, q in a],
+        })
 
 
 # --------------------------------------------------------------------------
@@ -1233,6 +1341,8 @@ class Handler(BaseHTTPRequestHandler):
                         "tickers": len(HUB.tickers), "clients": len(HUB.clients),
                         "streams": len(HUB.explicit | HUB.top) + len(HUB.want_klines),
                         "last": int(HUB.last_ws_msg * 1000),
+                        "fut": FUTURES.state if FUTURES else "off",
+                        "futdepth": FUT_DEPTH.state if FUT_DEPTH else "off",
                     })
             return self.static(u.path)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -1495,10 +1605,12 @@ def build_server(host, port):
     threading.Thread(target=load_klines, daemon=True).start()
 
     detect_proxy()
-    global FUTURES
+    global FUTURES, FUT_DEPTH
     if SOCKS_PROXY:
         FUTURES = FuturesWorker(HUB)
         FUTURES.start()
+        FUT_DEPTH = DepthWorker(HUB)
+        FUT_DEPTH.start()
 
     StreamWorker(HUB).start()
     threading.Thread(target=push_loop, daemon=True).start()

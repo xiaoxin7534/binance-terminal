@@ -317,7 +317,7 @@ binance-terminal/
 | `/api/fundinghist` | 近 12 次资金费率结算 |
 | `/api/intraday` | 分时：本地当天 00:00 起的 1m 收盘价 + 今日开盘价 |
 | `/api/stream` | SSE：`tk` 行情增量 / `k` K线 / `d` 盘口 / `r` 逐笔 / `fund` 费率变化 |
-| `/api/status` | 连接数、订阅数、消息数 |
+| `/api/status` | 连接数、订阅数、消息数、`fut`/`futdepth` 两条合约流的状态 |
 
 ---
 
@@ -364,17 +364,22 @@ binance-terminal/
 **SSE 推送**：`{"t":"fund","d":[[sym@f, fr%, nft], ...]}`，只含发生变化的合约，
 每分钟约 160~210 条 / 12KB。`nextFundingTime` 稳定，变的基本都是 `fr`。
 
-### 合约流的能力边界（实测，别再试了）
-| 流 | `/market/stream` 上是否可用 |
-|---|---|
-| `!ticker@arr` | ✅ 全市场合约快照 |
-| `<sym>@kline_1m` | ✅ 合约 K 线实时推送 |
-| `<sym>@aggTrade` | ✅ 逐笔 |
-| `<sym>@depth20@100ms` / `@depth20` / `@depth@100ms` | ❌ 全部 0 帧，无报错也不给数据 |
+### 合约流：两条连接，别搞混（2026-11-04 晚修正）
+**旧结论「合约没有 depth 流」是错的**——那只对 `/market/stream` 成立。
+币安合约有两条不同的 WebSocket 入口，能力不一样：
 
-因此：**合约 K 线走 `FuturesWorker` 的动态订阅**（`_wanted()` 每 1.2 秒对一次账），
-**合约盘口只能 REST 轮询**（前端详情面板 4 秒一次）。
-现货流里绝不能出现 `btcusdt@f@kline_1m` 这种带 @f 的流名——非法，`desired_streams()` 里已过滤。
+| 端点 | 有什么 | 谁在用 |
+|---|---|---|
+| `wss://fstream.binance.com/market/stream` | `!ticker@arr` 全市场快照、`@kline`、`@aggTrade`；**没有 depth** | `FuturesWorker` |
+| `wss://fstream.binance.com/stream` | 标准合并流：`@depth20@100ms` 正常 100ms 一帧；**`!ticker@arr` 收不到** | `DepthWorker` |
+
+所以：
+- **合约 K 线 / 逐笔** → `FuturesWorker`（`/market/stream`，`_wanted()` 每 1.2 秒对账）
+- **合约盘口** → `DepthWorker`（`/stream`，只订阅当前正在看的那个合约，`@depth20@100ms`）
+- 前端详情面板的 REST 轮询降到 **30 秒兜底**（`reloadBook()`，只补盘口不动逐笔）
+
+`tools/probe_fstream_depth.py` 是当时的探测脚本，六种写法全测过，留着以便币安改端点时复测。
+现货流里仍然绝不能出现 `btcusdt@f@kline_1m` 这种带 @f 的流名——非法，`desired_streams()` 里已过滤。
 
 ### 板块分类（2026-11-04 晚改成官方数据）
 `sectors.json` 结构：`{"labels": {code: 中文名}, "map": {base: [tag, ...]}, "meta": {...}}`。
