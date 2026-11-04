@@ -238,7 +238,7 @@ export class DetailPanel {
         <span class="dt-chart-tag">近 2 小时</span>
       </div>
       <div class="dt-section">
-        <h4>24 小时统计<span class="line"></span></h4>
+        <h4>行情统计<span class="cd" data-role="cd"></span><span class="line"></span></h4>
         <div class="kv-grid">
           <div class="kv"><span>今开</span><b data-role="o">${fmtPrice(row.o, dp)}</b></div>
           <div class="kv"><span>均价</span><b data-role="wavg">${fmtPrice(row.wavg, dp)}</b></div>
@@ -249,10 +249,8 @@ export class DetailPanel {
           <div class="kv"><span>振幅</span><b data-role="amp">--</b></div>
           <div class="kv"><span>涨跌额</span><b data-role="chg" class="${dirClass(row.chgp)}">--</b></div>
         </div>
-      </div>
-      ${info.perp ? `
-      <div class="dt-section" data-role="perp">
-        <h4>合约数据<span class="cd" data-role="cd"></span><span class="line"></span></h4>
+        ${info.perp ? `<div data-role="perp">
+        <div class="kv-divider"></div>
         <div class="kv-grid">
           <div class="kv"><span>资金费率</span><b data-role="fr" class="${row.fr == null ? '' : dirClass(row.fr)}">${row.fr == null ? '--' : fmtFunding(row.fr)}</b></div>
           <div class="kv"><span>下次结算</span><b data-role="nft">${row.nft ? p2(new Date(row.nft).getMonth() + 1) + '/' + p2(new Date(row.nft).getDate()) + ' ' + p2(new Date(row.nft).getHours()) + ':' + p2(new Date(row.nft).getMinutes()) : '--'}</b></div>
@@ -272,7 +270,8 @@ export class DetailPanel {
         <div class="lsrh" data-role="lsrh" hidden></div>
         <div class="fh-head"><span>资金费率历史</span><span>近 9 次结算</span></div>
         <div class="fhist" data-role="fhist"></div>
-      </div>` : ''}
+        </div>` : ''}
+      </div>
       <div class="dt-section">
         <h4>盘口<span class="line"></span><button class="book-tag book-step" data-role="step" title="价格合并粒度">${this.stepLabel()}</button></h4>
         <div class="book" data-role="book"><div class="muted" style="padding:8px 4px">等待盘口数据…</div></div>
@@ -486,8 +485,14 @@ export class DetailPanel {
     const bidCol = bids.map(([p, q]) => cell(p, q, 'bid')).join('');
 
     this.bookEl.innerHTML = `<div class="book-grid">
-        <div class="book-col">${askCol}</div>
-        <div class="book-col">${bidCol}</div>
+        <div class="book-col">
+          <div class="book-side ask"><i>S</i><span>卖出</span></div>
+          <div class="book-rows">${askCol}</div>
+        </div>
+        <div class="book-col">
+          <div class="book-side bid"><i>B</i><span>买入</span></div>
+          <div class="book-rows">${bidCol}</div>
+        </div>
       </div>
       <div class="spread-row">价差 <b>${spread == null ? '--' : fmtPrice(spread, dp)}</b>
         <span>${spreadPct == null ? '' : spreadPct.toFixed(3) + '%'}</span></div>`;

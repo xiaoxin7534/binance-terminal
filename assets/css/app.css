@@ -1857,13 +1857,55 @@ kbd {
 .book-step:hover { color: var(--text); background: var(--hover); opacity: 1; }
 .book-grid {
   display: flex;
-  gap: 8px;
+  gap: 12px;
 }
 .book-col {
   flex: 1 1 0;
   min-width: 0;
   display: flex;
+  flex-direction: column;
+}
+/* 中间一条竖线把买盘卖盘分开 */
+.book-col:first-child {
+  border-right: 1px solid var(--border);
+  padding-right: 10px;
+}
+.book-rows {
+  display: flex;
   flex-direction: column-reverse;   /* 卖一/买一贴底，靠近价差行 */
+}
+/* S / B 竖置表头 */
+.book-side {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 3px 4px;
+  margin-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+  font-size: 9px;
+  letter-spacing: .4px;
+}
+.book-side i {
+  font-style: normal;
+  font-weight: 700;
+  font-size: 9.5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+.book-side.ask { color: var(--ask); }
+.book-side.ask i { background: var(--ask); }
+.book-side.bid { color: var(--bid); }
+.book-side.bid i { background: var(--bid); }
+
+/* 行情统计里「24h 数据」和「合约数据」之间的分隔 */
+.kv-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 11px 0 10px;
 }
 .book-col .book-row {
   grid-template-columns: 1fr auto;
