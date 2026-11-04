@@ -1266,10 +1266,15 @@ IV_MS = {
 }
 KLINE_TTL = 30.0           # 这么新的缓存直接返回，不打接口（前端 WS 会实时补最后一根）
 KLINE_KEEP = 3000          # 单条序列最多留多少根
-KLINE_MAX_SERIES = 480     # 最多缓存多少条序列（约 15MB，够覆盖常用币的多个周期）
+KLINE_MAX_SERIES = 1200    # 内存里最多留多少条序列（磁盘不限，内存淘汰后下次从盘里读回来）
+KLINE_FETCH = 1000         # 首次拉取多拉一些存着，用户往前拖不用再请求
+KLINES_DIR = os.path.join(CACHE_DIR, "klines")     # 每条序列一个文件，按需读
+DISK_MAX_FILES = 6000      # 磁盘最多留多少个分片
 KLINES = {}
 _klines_lock = threading.Lock()
 _klines_dirty = False
+_dirty_keys = set()
+_dirty_lock = threading.Lock()
 
 
 def _fetch_klines(perp, sym, iv, limit, start=None):
@@ -1311,6 +1316,12 @@ def get_klines(perp, sym, iv, limit):
     ttl = max(KLINE_TTL, min(300.0, step / 2000.0))
     with _klines_lock:
         ent = KLINES.get(key)
+    if ent is None:
+        # 内存里没有，先看看磁盘上有没有（重启后第一件事就是这个）
+        ent = _read_disk(key)
+        if ent:
+            with _klines_lock:
+                KLINES[key] = ent
     if ent and now - ent["ts"] < ttl and len(ent["bars"]) >= min(limit, 50):
         return ent["bars"][-limit:]
 
@@ -1321,7 +1332,14 @@ def get_klines(perp, sym, iv, limit):
 
     try:
         if start is None:
-            merged = _fetch_klines(perp, sym, iv, limit)
+            # 首次多拉一些存着：用户往左拖、切大图都不用再打接口
+            fresh = _fetch_klines(perp, sym, iv, max(limit, KLINE_FETCH))
+            # 隔了很久再打开时 start 会被置空走这条路，别把磁盘上更早的历史冲掉
+            if bars and fresh and bars[0][0] < fresh[0][0]:
+                older = [b for b in bars if b[0] < fresh[0][0]]
+                merged = older + fresh
+            else:
+                merged = fresh
         else:
             need = int((now * 1000 - start) / step) + 3
             merged = _merge_bars(bars, _fetch_klines(perp, sym, iv, max(2, min(need, 500)), start))
@@ -1336,9 +1354,11 @@ def get_klines(perp, sym, iv, limit):
     with _klines_lock:
         KLINES[key] = {"ts": now, "bars": merged}
         if len(KLINES) > KLINE_MAX_SERIES:
+            # 只从内存里淘汰，磁盘上还在，下次用到再读回来
             for k in sorted(KLINES, key=lambda x: KLINES[x]["ts"])[:40]:
                 KLINES.pop(k, None)
-    _klines_dirty = True
+    with _dirty_lock:
+        _dirty_keys.add(key)
     return merged[-limit:]
 
 
@@ -1385,42 +1405,102 @@ def prefetch_klines():
         threading.Thread(target=worker, daemon=True).start()
 
 
-def load_klines():
+def _kfile(key):
+    """key 形如 s:BTCUSDT|1m / f:BTCUSDT@1m，转成安全文件名"""
+    name = key.replace(":", "_").replace("|", "_").replace("@", "_")
+    return os.path.join(KLINES_DIR, name + ".json")
+
+
+def _read_disk(key):
     try:
+        with open(_kfile(key), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if d.get("bars"):
+            return {"ts": d.get("ts", 0), "bars": d["bars"]}
+    except Exception:           # noqa: BLE001
+        pass
+    return None
+
+
+def _write_disk(key, ent):
+    os.makedirs(KLINES_DIR, exist_ok=True)
+    p = _kfile(key)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"ts": ent.get("ts", 0), "bars": ent["bars"]}, f, separators=(",", ":"))
+    os.replace(tmp, p)
+
+
+def _prune_disk():
+    """分片太多就按修改时间删最旧的"""
+    try:
+        files = [os.path.join(KLINES_DIR, f) for f in os.listdir(KLINES_DIR) if f.endswith(".json")]
+        if len(files) <= DISK_MAX_FILES:
+            return
+        files.sort(key=lambda p: os.path.getmtime(p))
+        for p in files[:len(files) - DISK_MAX_FILES]:
+            try:
+                os.remove(p)
+            except Exception:   # noqa: BLE001
+                pass
+    except Exception:           # noqa: BLE001
+        pass
+
+
+def kline_saver():
+    """后台把改动过的序列写回磁盘（每条一个文件，不整体重写）"""
+    while True:
+        time.sleep(2.0)
+        with _dirty_lock:
+            keys = list(_dirty_keys)
+            _dirty_keys.clear()
+        if not keys:
+            continue
+        for k in keys:
+            with _klines_lock:
+                ent = KLINES.get(k)
+            if not ent:
+                continue
+            try:
+                _write_disk(k, ent)
+            except Exception:   # noqa: BLE001
+                pass
+        if len(keys) > 20:
+            _prune_disk()
+
+
+def load_klines():
+    """启动时**不**全量载入（分片可能上千个），只把老的单文件缓存迁过来。
+
+    真正读取发生在 get_klines() 里：内存没有就去磁盘捞那一条，几毫秒。
+    """
+    try:
+        if not os.path.exists(KLINES_FILE):
+            return
         with open(KLINES_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        if d.get("v") != 1:
-            return
-        cutoff = time.time() - 7 * 86400
         n = 0
-        with _klines_lock:
-            for k, v in (d.get("s") or {}).items():
-                if v.get("ts", 0) > cutoff and v.get("bars"):
-                    KLINES[k] = v
+        for k, v in (d.get("s") or {}).items():
+            if v.get("bars"):
+                try:
+                    _write_disk(k, v)
                     n += 1
-        if n:
-            log("载入 K 线缓存 %d 条序列" % n)
+                except Exception:       # noqa: BLE001
+                    pass
+        os.replace(KLINES_FILE, KLINES_FILE + ".migrated")
+        log("K 线缓存迁移到分片目录：%d 条" % n)
     except Exception:           # noqa: BLE001
         pass
 
 
 def save_klines(force=False):
-    global _klines_dirty
-    if not _klines_dirty and not force:
+    """兼容旧调用：把所有脏序列标一遍，由 kline_saver 后台写盘"""
+    if not force and not _dirty_keys:
         return
-    _klines_dirty = False
-    try:
-        with _klines_lock:
-            snap = dict(KLINES)
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        tmp = KLINES_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"v": 1, "s": snap}, f, separators=(",", ":"))
-        os.replace(tmp, KLINES_FILE)
-        if snap:
-            log("K 线缓存已保存 %d 条序列" % len(snap))
-    except Exception as e:      # noqa: BLE001
-        log("K 线缓存落盘失败: %s" % e)
+    with _klines_lock:
+        keys = list(KLINES.keys())
+    with _dirty_lock:
+        _dirty_keys.update(keys)
 
 
 # --------------------------------------------------------------------------
@@ -1849,6 +1929,7 @@ def build_server(host, port):
     load_sectors()
     load_listing()
     threading.Thread(target=load_klines, daemon=True).start()
+    threading.Thread(target=kline_saver, daemon=True).start()
     threading.Thread(target=prefetch_klines, daemon=True).start()
 
     detect_proxy()
