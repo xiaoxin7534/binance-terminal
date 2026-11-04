@@ -427,7 +427,8 @@ test('大图：右侧盘口栏可开关', async (s) => {
     await new Promise(r=>setTimeout(r,300));
     big.open('BTCUSDT@f','1m');
     await new Promise(r=>setTimeout(r,3500));
-    document.querySelector('#bc-detail-btn').click();
+    // 盘口栏现在默认打开，先确保它是开的
+    if (!big.showDetail) document.querySelector('#bc-detail-btn').click();
     await new Promise(r=>setTimeout(r,5000));
     const p = document.querySelector('#bc-detail');
     const on = { visible: p.getClientRects().length > 0, rows: p.querySelectorAll('.book-row').length,

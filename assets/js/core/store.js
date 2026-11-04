@@ -21,7 +21,8 @@ const DEFAULTS = {
   interval: '1m',
   indicators: { ma: true, vol: true, macd: true, boll: false },
   sync: true,
-  detailOpen: false,   // 图表墙右侧详情侧板（默认收起，4×2 时开着会压窄每格）
+  detailOpen: true,    // 多品种同列右侧详情侧板（默认打开）
+  bcDetailOpen: true,  // 大图右侧盘口栏（默认打开）
   cells: DEFAULT_SYMBOLS.slice(0, 8),
   favs: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'],
   selected: 'BTCUSDT',
@@ -44,6 +45,13 @@ function load() {
     if (saved.tab === 'perp') {                        // 永续从页签升级为一级分类
       saved.mkt = 'perp';
       saved.tab = 'all';
+    }
+    // v2：两个侧栏改成默认打开。老用户 localStorage 里存的是 false，
+    // 迁一次，之后就按用户自己的选择走
+    if (!saved.uiV || saved.uiV < 2) {
+      saved.detailOpen = true;
+      saved.bcDetailOpen = true;
+      saved.uiV = 2;
     }
     return {
       ...DEFAULTS, ...saved,
@@ -72,7 +80,7 @@ export function save() {
         detailOpen: state.detailOpen,
         selected: state.selected, mkt: state.mkt, tab: state.tab, sector: state.sector,
         gridSector: state.gridSector, colOrder: state.colOrder, sort: state.sort,
-        alert: state.alert,
+        alert: state.alert, uiV: 2,
       }));
     } catch (e) { /* 隐私模式下忽略 */ }
   }, 250);

@@ -8,7 +8,7 @@
  */
 
 import { api } from '../core/api.js';
-import { state, market, dpOf } from '../core/store.js';
+import { state, market, dpOf, save } from '../core/store.js';
 import { fmtPrice, fmtPct, fmtCompact, dirClass, symLabel } from '../core/fmt.js';
 import { Cell } from './cell.js';
 import { DetailPanel } from './detail.js';
@@ -618,12 +618,15 @@ export class BigChart {
     this.draw = null;
     this.boundChart = null;
     this.hoverIdx = -1;
-    this.showDetail = false;
+    this.showDetail = !!state.bcDetailOpen;   // 默认打开，用户关过才记成 false
     this.oiOn = false;
     this.oiSeries = null;
     this.oiData = null;
 
     this.body = root.querySelector('.bc-body');
+    // 复位按钮挂在图表格子里，不能挂在 .bc-body —— 那里面还含右侧盘口栏，
+    // right:72px 会算到盘口栏上面去
+    this.resetBtn = root.querySelector('#bc-reset');
     this.detailPanel = new DetailPanel(root.querySelector('#bc-detail'), { delay: 0 });
     this.infoEl = root.querySelector('#bc-info');
     this.pxEl = root.querySelector('#bc-px');
@@ -635,6 +638,10 @@ export class BigChart {
     this.toolBar = root.querySelector('#bc-draw');
 
     this.bindBar();
+    // 按上次的选择同步 UI（HTML 里不写死，避免首帧闪一下）
+    this.body.classList.toggle('dt-off', !this.showDetail);
+    const db = this.root.querySelector('#bc-detail-btn');
+    if (db) db.classList.toggle('on', this.showDetail);
   }
 
   isOpen() {
@@ -778,6 +785,8 @@ export class BigChart {
   /** 右侧盘口栏（复用列表页那块 DetailPanel） */
   setDetail(on) {
     this.showDetail = !!on;
+    state.bcDetailOpen = this.showDetail;
+    save();
     this.body.classList.toggle('dt-off', !this.showDetail);
     const btn = this.root.querySelector('#bc-detail-btn');
     if (btn) btn.classList.toggle('on', this.showDetail);
@@ -884,6 +893,7 @@ export class BigChart {
     const cell = new Cell(stub, 0);
     cell.interval = this.interval;
     this.body.insertBefore(cell.el, this.detailPanel.root);
+    if (this.resetBtn) cell.el.appendChild(this.resetBtn);
     cell.setSymbol(this.symbol);
     cell.mount();
     cell.syncTools();

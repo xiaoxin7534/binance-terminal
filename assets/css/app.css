@@ -1826,7 +1826,7 @@ kbd {
 .bc-reset:hover { opacity: 1; color: var(--text); background: var(--panel); }
 .bc-reset.spin svg { animation: resetSpin .42s ease-out; }
 @keyframes resetSpin {
-  from { transform: rotate(-120deg) scale(.8); opacity: .4; }
+  from { transform: rotate(-200deg); opacity: .35; }
   to { transform: none; opacity: 1; }
 }
 /* 用户拖过图、已经偏离自动取景时，按钮常亮提示可以复位 */
