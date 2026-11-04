@@ -1842,6 +1842,19 @@ kbd {
   color: var(--muted);
   opacity: .8;
 }
+/* 价格合并粒度：做成可点的下拉 */
+.book-step {
+  cursor: pointer;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: none;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: .2px;
+  color: var(--muted);
+  transition: background .12s, color .12s;
+}
+.book-step:hover { color: var(--text); background: var(--hover); opacity: 1; }
 .book-grid {
   display: flex;
   gap: 8px;

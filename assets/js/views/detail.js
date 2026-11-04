@@ -2,6 +2,7 @@
 
 import { api } from '../core/api.js';
 import { market, state, dpOf, isFav, toggleFav, sectorLabels } from '../core/store.js';
+import { openMenu } from '../core/picker.js';
 import {
   fmtPrice, fmtCompact, fmtPct, fmtQty, fmtFunding, dirClass, clockTime,
 } from '../core/fmt.js';
@@ -34,6 +35,7 @@ export class DetailPanel {
     this.trades = [];
     this.lastDepth = null;
     this.pendTimers = [];      // 延后发出的请求（切币时要取消）
+    this.bookStep = 0;         // 盘口价格合并粒度，0 = 原始精度
     this.renderEmpty();
   }
 
@@ -88,6 +90,7 @@ export class DetailPanel {
     this.trades = [];
     this.lastDepth = null;
     this.perp = null;
+    this.bookStep = 0;
     this.pendTimers.forEach(clearTimeout);
     this.pendTimers = [];
     clearInterval(this.cdTimer);
@@ -121,7 +124,13 @@ export class DetailPanel {
     const sym = this.symbol;
     if (!sym) return;
     try {
-      const d = await api.depth(sym, 20);
+      // 合并粒度越大，越需要更多原始档才凑够 10 档：need = 10 × (粒度 / 最小跳动)
+      let lim = 20;
+      if (this.bookStep) {
+        const need = Math.ceil((10 * this.bookStep) / this.tick());
+        lim = Math.min(1000, Math.max(50, need));
+      }
+      const d = await api.depth(sym, lim);
       if (sym !== this.symbol) return;
       this.lastDepth = { s: sym, b: d.b || [], a: d.a || [] };
       this.renderBook();
@@ -265,7 +274,7 @@ export class DetailPanel {
         <div class="fhist" data-role="fhist"></div>
       </div>` : ''}
       <div class="dt-section">
-        <h4>盘口<span class="line"></span><span class="book-tag">买卖各 10 档</span></h4>
+        <h4>盘口<span class="line"></span><button class="book-tag book-step" data-role="step" title="价格合并粒度">${this.stepLabel()}</button></h4>
         <div class="book" data-role="book"><div class="muted" style="padding:8px 4px">等待盘口数据…</div></div>
       </div>
       <div class="dt-section" style="border-bottom:none">
@@ -288,6 +297,9 @@ export class DetailPanel {
       svg.setAttribute('fill', on ? 'currentColor' : 'none');
       svg.style.color = on ? '#f5a623' : 'var(--muted)';
     });
+
+    const stepBtn = this.$('step');
+    if (stepBtn) stepBtn.addEventListener('click', () => this.openStepMenu(stepBtn));
 
     const closeBtn = this.root.querySelector('[data-role="close"]');
     if (closeBtn && this.opts.onClose) closeBtn.addEventListener('click', () => this.opts.onClose());
@@ -391,6 +403,8 @@ export class DetailPanel {
 
   onDepth(msg) {
     if (!msg || msg.s !== this.symbol) return;
+    // 合并粒度模式下用的是 REST 拉的 200 档，WS 只推 20 档会把深档冲掉
+    if (this.bookStep) return;
     this.lastDepth = msg;
     this.lastDepthAt = Date.now();
     if (this.depthTimer) return;
@@ -400,14 +414,62 @@ export class DetailPanel {
     }, 120);
   }
 
+  /** tick = 最小价格变动，按小数位推出来 */
+  tick() {
+    return Math.pow(10, -dpOf(this.symbol));
+  }
+
+  stepLabel() {
+    if (!this.bookStep) return '原始 ▾';
+    const d = dpOf(this.symbol);
+    return String(Number(this.bookStep.toFixed(Math.max(d, 8)))) + ' ▾';
+  }
+
+  openStepMenu(anchor) {
+    const tick = this.tick();
+    const items = [{ key: '0', label: '原始精度' }, { divider: true }];
+    for (let i = 0; i < 5; i++) {
+      const v = tick * Math.pow(10, i);
+      items.push({ key: String(v), label: String(Number(v.toFixed(8))) });
+    }
+    openMenu(anchor, items, String(this.bookStep), (key) => {
+      this.bookStep = Number(key);
+      const btn = this.$('step');
+      if (btn) btn.textContent = this.stepLabel();
+      // 粒度大时 20 档原始数据不够用，改成 REST 拉更多档 + 快一点的轮询
+      clearInterval(this.bookTimer);
+      if (this.bookStep) {
+        this.reloadBook();
+        this.bookTimer = setInterval(() => {
+          if (!this.visible()) return;
+          this.reloadBook();
+        }, 2500);
+      }
+      this.renderBook();
+    });
+  }
+
+  /** 按粒度合并档位：卖价向上取整、买价向下取整（保守，不会把价算错方向） */
+  groupLevels(levels, step, side) {
+    if (!step || !levels.length) return levels;
+    const m = new Map();
+    for (const [p, q] of levels) {
+      const k = side === 'ask'
+        ? Math.ceil(p / step - 1e-9) * step
+        : Math.floor(p / step + 1e-9) * step;
+      m.set(k, (m.get(k) || 0) + q);
+    }
+    return [...m.entries()].sort((a, b) => (side === 'ask' ? a[0] - b[0] : b[0] - a[0]));
+  }
+
   renderBook() {
     const msg = this.lastDepth;
     if (!msg || !this.bookEl) return;
     const dp = dpOf(this.symbol);
     // 买卖各 10 档，并排两列：左卖右买，都用 column-reverse 让「卖一/买一」贴底，
     // 价差行紧跟在下面。10 行的高度 ≈ 原来 20 行的一半，不用再往下滚
-    const asks = msg.a.slice(0, 10);
-    const bids = msg.b.slice(0, 10);
+    const asks = this.groupLevels(msg.a, this.bookStep, 'ask').slice(0, 10);
+    const bids = this.groupLevels(msg.b, this.bookStep, 'bid').slice(0, 10);
     const maxQ = Math.max(
       ...asks.map((x) => x[1]), ...bids.map((x) => x[1]), 0.0000001
     );

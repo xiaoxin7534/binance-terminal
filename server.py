@@ -1860,7 +1860,12 @@ class Handler(BaseHTTPRequestHandler):
         sym = (qs.get("symbol") or ["BTCUSDT"])[0]
         perp = sym.endswith("@f")
         sym = sym[:-2] if perp else sym.upper()
-        limit = min(int((qs.get("limit") or ["20"])[0]), 50)
+        limit = min(int((qs.get("limit") or ["20"])[0]), 1000)  # 盘口合并粒度大时要更多原始档
+        if perp:
+            # 合约 depth 只认这几档，传 200 会被当成非法值
+            limit = next((v for v in (5, 10, 20, 50, 100, 500, 1000) if v >= limit), 1000)
+        else:
+            limit = next((v for v in (5, 10, 20, 50, 100, 500, 1000, 5000) if v >= limit), 5000)
         if perp:
             raw = json.loads(cached_fapi("/fapi/v1/depth?symbol=%s&limit=%d" % (sym, limit), 1, 30))
         else:
