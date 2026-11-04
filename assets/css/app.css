@@ -1978,3 +1978,36 @@ kbd {
 /* 左列价格靠左、数量靠右；右列同理，视觉上像两块对称的表 */
 .book-col:last-child .book-row .bp { text-align: right; }
 .book-col:last-child .book-row .bq { text-align: right; }
+
+/* ==========================================================================
+   详情面板：拖动调宽 + 可收起
+   ========================================================================== */
+.dt-resize {
+  flex: 0 0 5px;
+  margin-left: -1px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 6;
+  background: transparent;
+  transition: background .12s;
+}
+.dt-resize::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 1px;
+  height: 34px;
+  margin-top: -17px;
+  border-radius: 1px;
+  background: var(--border-2);
+  opacity: 0;
+  transition: opacity .14s;
+}
+.dt-resize:hover::after { opacity: 1; }
+.dt-resize:hover,
+.dt-resize.active { background: var(--accent-soft); }
+
+/* 收起详情 */
+.view-list.dt-off .detail,
+.view-list.dt-off .dt-resize { display: none; }

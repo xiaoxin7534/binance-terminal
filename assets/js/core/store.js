@@ -23,6 +23,8 @@ const DEFAULTS = {
   sync: true,
   detailOpen: true,    // 多品种同列右侧详情侧板（默认打开）
   bcDetailOpen: true,  // 大图右侧盘口栏（默认打开）
+  listDetailOpen: true, // 列表页右侧详情（默认打开）
+  detailWidth: 0,       // 拖动调过的宽度，0 = 按 CSS 自适应
   cells: DEFAULT_SYMBOLS.slice(0, 8),
   favs: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'],
   selected: 'BTCUSDT',
@@ -81,6 +83,7 @@ export function save() {
         selected: state.selected, mkt: state.mkt, tab: state.tab, sector: state.sector,
         gridSector: state.gridSector, colOrder: state.colOrder, sort: state.sort,
         alert: state.alert, uiV: 2,
+        listDetailOpen: state.listDetailOpen, detailWidth: state.detailWidth,
       }));
     } catch (e) { /* 隐私模式下忽略 */ }
   }, 250);

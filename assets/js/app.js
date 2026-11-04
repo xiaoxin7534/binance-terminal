@@ -273,6 +273,65 @@ function setGridDetail(on) {
   syncSubs();
 }
 
+/* ------------------------------------------------------------------ 列表页详情面板 */
+function setListDetail(on) {
+  state.listDetailOpen = !!on;
+  save();
+  const view = $('#view-list');
+  if (view) view.classList.toggle('dt-off', !state.listDetailOpen);
+  const btn = $('#list-detail-btn');
+  if (btn) btn.classList.toggle('on', state.listDetailOpen);
+  if (list) list.onShow();          // 重新算列宽
+}
+
+/** 拖动详情面板左边缘调宽 */
+function bindDetailResize() {
+  const h = $('#dt-resize');
+  const d = $('#detail');
+  if (!h || !d) return;
+
+  // 恢复上次拖的宽度
+  if (state.detailWidth) {
+    d.style.width = state.detailWidth + 'px';
+    d.style.flexBasis = state.detailWidth + 'px';
+  }
+
+  let startX = 0;
+  let startW = 0;
+  let dragging = false;
+
+  h.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    startX = e.clientX;
+    startW = d.getBoundingClientRect().width;
+    h.setPointerCapture(e.pointerId);
+    h.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  h.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    // 往左拖变宽
+    const w = Math.max(320, Math.min(920, startW - (e.clientX - startX)));
+    d.style.width = w + 'px';
+    d.style.flexBasis = w + 'px';
+    state.detailWidth = w;
+  });
+
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    h.classList.remove('active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    save();
+    if (list) list.onShow();
+  };
+  h.addEventListener('pointerup', end);
+  h.addEventListener('pointercancel', end);
+}
+
 /* ------------------------------------------------------------------ 大图模式 */
 function openBig(sym, iv) {
   if (!big || !sym) return;
@@ -455,6 +514,8 @@ function bindToolbar() {
     else alerts.open();
   });
 
+  $('#list-detail-btn').addEventListener('click', () => setListDetail(!state.listDetailOpen));
+
   $('#help-close').addEventListener('click', () => toggleHelp(false));
   $('#help').addEventListener('click', (e) => {
     if (e.target.id === 'help') toggleHelp(false);
@@ -540,6 +601,8 @@ async function boot() {
   });
   watch.setActive(state.selected);
   document.querySelector('.app').classList.toggle('watch-off', !state.watchOpen);
+  setListDetail(state.listDetailOpen);
+  bindDetailResize();
 
   bindToolbar();
   markActive();
