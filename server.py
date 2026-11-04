@@ -95,8 +95,21 @@ SOCKS_PROXY = None
 
 
 def detect_proxy():
-    """探测本机常见代理端口，返回 (host, port) 或 None"""
+    """探测本机常见代理端口，返回 (host, port) 或 None
+
+    想指定代理：设环境变量 BINANCE_PROXY=socks5://127.0.0.1:1080
+    （也接受 host:port，协议前缀会被忽略）
+    """
     global SOCKS_PROXY
+    env = (os.environ.get("BINANCE_PROXY") or "").strip()
+    if env:
+        raw = env.split("://", 1)[-1]
+        host, _, port = raw.rpartition(":")
+        if host and port.isdigit():
+            SOCKS_PROXY = (host, int(port))
+            log("使用环境变量指定的代理 %s:%s" % SOCKS_PROXY)
+            return SOCKS_PROXY
+        log("BINANCE_PROXY 格式不对（要 host:port），忽略")
     for port in (10808, 1080, 7890, 7891, 10809, 2080, 20171):
         try:
             sk = socket.create_connection(("127.0.0.1", port), timeout=0.35)
@@ -1282,6 +1295,41 @@ def save_klines(force=False):
 
 
 # --------------------------------------------------------------------------
+# 前端报错落盘
+# --------------------------------------------------------------------------
+
+FRONT_LOG = os.path.join(CACHE_DIR, "frontend-errors.log")
+_front_log_lock = threading.Lock()
+_front_log_seen = {}          # 同一条错误 5 分钟内只记一次，防止刷屏
+
+
+def append_frontend_log(body):
+    """前端 window.onerror / unhandledrejection 送过来的错误。
+
+    打包成 exe 后用户看不到 DevTools，白屏时只能靠这个文件定位。
+    """
+    msg = str(body.get("msg") or "")[:2000]
+    if not msg:
+        return
+    key = msg[:160]
+    now = time.time()
+    with _front_log_lock:
+        if now - _front_log_seen.get(key, 0) < 300:
+            return
+        _front_log_seen[key] = now
+        if len(_front_log_seen) > 500:
+            _front_log_seen.clear()
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(FRONT_LOG, "a", encoding="utf-8") as f:
+                f.write("[%s] %s\n  url=%s\n  stack=%s\n" % (
+                    time.strftime("%Y-%m-%d %H:%M:%S"), msg,
+                    body.get("url") or "", str(body.get("stack") or "")[:4000]))
+        except Exception:       # noqa: BLE001
+            pass
+
+
+# --------------------------------------------------------------------------
 # HTTP 服务
 # --------------------------------------------------------------------------
 
@@ -1343,6 +1391,7 @@ class Handler(BaseHTTPRequestHandler):
                         "last": int(HUB.last_ws_msg * 1000),
                         "fut": FUTURES.state if FUTURES else "off",
                         "futdepth": FUT_DEPTH.state if FUT_DEPTH else "off",
+                        "depth": HUB.depth_symbol or "",
                     })
             return self.static(u.path)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -1367,6 +1416,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/sub":
             HUB.set_wanted(body.get("tickers"), body.get("klines"),
                            body.get("depth"), body.get("trades"))
+            return self._json({"ok": True})
+        if u.path == "/api/log":
+            append_frontend_log(body)
             return self._json({"ok": True})
         self._json({"error": "not found"}, 404)
 

@@ -24,7 +24,7 @@ const BAR_LIMIT = 500;
 
 /* 前端 K 线缓存：长墙上下来回滚动时不用每次都等接口 */
 const KL_CACHE = new Map();
-const KL_CACHE_MAX = 120;
+const KL_CACHE_MAX = 320;   // 400 格全铺的墙来回滚也要够用，一条约 30KB
 
 function rememberKlines(key, k) {
   KL_CACHE.delete(key);
@@ -1008,7 +1008,6 @@ export class GridView {
     this.cells = [];
     this.cols = 4;
     this.focusIndex = 0;
-    this.zoomed = false;
     this.syncLock = 0;
     this.crossLock = false;
     this.scrollRaf = 0;
@@ -1060,10 +1059,6 @@ export class GridView {
   applyLayout() {
     const [cols, layRows] = state.layout.split('x').map(Number);
     this.cols = cols;
-    if (this.zoomed) {
-      this.zoomed = false;
-      this.root.classList.remove('zoomed');
-    }
     const total = this.totalCells(cols, layRows);
     const rowCount = Math.ceil(total / cols);
 
@@ -1106,15 +1101,6 @@ export class GridView {
   syncMount() {
     const cells = this.cells;
     if (!cells.length) return;
-    if (this.zoomed) {
-      // 放大态只有一张图，其余全部卸掉
-      for (let i = 0; i < cells.length; i++) {
-        const c = cells[i];
-        if (i === this.focusIndex) { if (!c.mounted) c.mount(); }
-        else if (c.mounted) c.unmountChart();
-      }
-      return;
-    }
     const cols = this.cols;
     const h0 = cells[0].el.offsetHeight;
     const rowH = (h0 > 20 ? h0 : 220) + 1;      // 首帧还没布局时用兜底值
@@ -1162,18 +1148,6 @@ export class GridView {
     const c = this.cells[this.focusIndex];
     if (!c || !c.symbol) return;
     if (this.ctx && this.ctx.onOpenBig) this.ctx.onOpenBig(c.symbol, c.interval);
-  }
-
-  /** 双击：把当前格子放大到整面墙，再双击还原（已被大图模式取代，仅保留能力） */
-  toggleZoom(i) {
-    if (i != null) this.setFocus(i);
-    this.zoomed = !this.zoomed;
-    this.root.classList.toggle('zoomed', this.zoomed);
-    this.syncMount();
-    requestAnimationFrame(() => {
-      const c = this.cells[this.focusIndex];
-      if (c && c.mounted) { c.autoFit = true; c.fitRange(); }
-    });
   }
 
   onCellsChanged() {
@@ -1277,6 +1251,8 @@ export class GridView {
 
   onKline(msg) {
     for (const c of this.cells) {
+      // 没挂载的格子 times 是空的，喂它也没用；挂载回来会重新 load 一次
+      if (!c.mounted) continue;
       if (c.symbol === msg.s && wsInterval(c.interval) === msg.i) c.onKline(msg.d);
     }
   }

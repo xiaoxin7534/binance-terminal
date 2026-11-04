@@ -15,6 +15,29 @@ import { BigChart } from './views/bigchart.js';
 
 const $ = (s) => document.querySelector(s);
 
+/* ------------------------------------------------------------------ 报错落盘 */
+// 打包成 exe 后用户看不到 DevTools，白屏时只能靠服务端日志定位。
+// 服务端会对同一条错误做 5 分钟去重，这里再加一层总量上限，防止错误风暴。
+let errSent = 0;
+function reportError(msg, url, stack) {
+  if (errSent > 40) return;
+  errSent++;
+  try {
+    fetch('/api/log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ msg: String(msg || ''), url: url || location.href, stack: stack || '' }),
+    }).catch(() => {});
+  } catch (e) { /* 忽略 */ }
+}
+window.addEventListener('error', (e) => {
+  reportError(e.message, e.filename, e.error && e.error.stack);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  reportError('unhandledrejection: ' + ((r && r.message) || r), location.href, r && r.stack);
+});
+
 let grid = null;
 let list = null;
 let detail = null;
@@ -523,6 +546,8 @@ async function boot() {
   });
 
   onFrame((dirty) => {
+    // 窗口在后台时只收数据、不刷 DOM；切回来时全量补一次（见下面的 visibilitychange）
+    if (document.hidden) return;
     if (state.view === 'grid') grid.onFrame(dirty);
     else list.updateLive(dirty);
     updateTape(dirty);
@@ -536,6 +561,18 @@ async function boot() {
 
   switchView(state.view);
   syncSubs();
+
+  // 从后台切回来：后台期间跳过的 DOM 更新一次性补上。
+  // 用一个永远命中的 has() 代替构造 1800 个元素的 Set
+  const ALL = { has: () => true };
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (state.view === 'grid') grid.onFrame(ALL);
+    else list.updateLive(ALL);
+    updateTape(null);
+    if (watch) watch.update(null);
+    if (big && big.isOpen()) big.onFrame(ALL);
+  });
 
   window.__term = { grid, list, detail, gridDetail, big, state, market };
 
@@ -582,7 +619,11 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); grid.moveFocus(0, 1); return; }
     if (e.key === 'Enter') { e.preventDefault(); grid.openBig(); return; }
   }
-  if (e.key === 'Escape' && grid && grid.zoomed) { grid.toggleZoom(); return; }
+  if (state.view === 'list' && list && e.key === 'Enter' && list.selected) {
+    e.preventDefault();
+    openBig(list.selected, state.interval);
+    return;
+  }
   if (e.key === 'Escape' && state.view === 'grid' && state.detailOpen) { setGridDetail(false); return; }
   if (e.key === '1') switchView('grid');
   else if (e.key === '2') switchView('list');

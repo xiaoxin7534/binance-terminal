@@ -61,6 +61,11 @@ export class DetailPanel {
 
   setSymbol(sym) {
     if (!sym) return;
+    // 同一个币被再次选中时 applySymbol 会 early-return，
+    // 但如果盘口已经很久没更新（WS 刚重连之类），这里补拉一次
+    if (sym === this.symbol && this.lastDepthAt && Date.now() - this.lastDepthAt > 5000) {
+      this.reloadBook();
+    }
     if (!this.delay) {
       this.applySymbol(sym);
       return;
@@ -374,6 +379,7 @@ export class DetailPanel {
   onDepth(msg) {
     if (!msg || msg.s !== this.symbol) return;
     this.lastDepth = msg;
+    this.lastDepthAt = Date.now();
     if (this.depthTimer) return;
     this.depthTimer = setTimeout(() => {
       this.depthTimer = 0;

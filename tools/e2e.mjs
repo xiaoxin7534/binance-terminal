@@ -307,6 +307,47 @@ test('列表：双击行进入大图', async (s) => {
   await s.ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); await new Promise(r=>setTimeout(r,600)); return 1;`);
 });
 
+test('列表：Enter 进大图', async (s) => {
+  const r = await s.ev(`
+    const row = document.querySelector('.tbody-inner .row');
+    row.click();
+    await new Promise(r=>setTimeout(r,800));
+    document.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+    await new Promise(r=>setTimeout(r,3000));
+    return { open: window.__term.big.isOpen(), sym: window.__term.big.symbol, sel: row.dataset.sym };
+  `);
+  assert(r.open, '列表按 Enter 没进大图');
+  assertEq(r.sym, r.sel, '进的品种和选中行不一致');
+  await s.ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); await new Promise(r=>setTimeout(r,600)); return 1;`);
+});
+
+test('合约盘口：WebSocket 实时推送（不是 4 秒轮询）', async (s) => {
+  const r = await s.ev(`
+    const rows = [...document.querySelectorAll('.tbody-inner .row')];
+    const perp = rows.find(r => r.dataset.sym.endsWith('@f'));
+    perp.click();
+    await new Promise(r=>setTimeout(r,5000));
+    const book = document.querySelector('#detail .book');
+    let n = 0;
+    const ob = new MutationObserver(() => n++);
+    ob.observe(book, { childList: true, subtree: true });
+    const s1 = await (await fetch('/api/status')).json();
+    await new Promise(r=>setTimeout(r,3000));
+    ob.disconnect();
+    const s2 = await (await fetch('/api/status')).json();
+    return { sym: perp.dataset.sym, mutations: n, rows: book.querySelectorAll('.book-row').length,
+             inDoc: document.contains(book), sel: window.__term.state.selected,
+             dsym: window.__term.detail.symbol, msgsDelta: s2.msgs - s1.msgs,
+             serverDepth: s2.depth, futDepthState: s2.futdepth };
+  `);
+  assert(r.rows > 0, '盘口没数据');
+  // 主断言看服务端有没有把这条合约的 depth 流订上（确定性，不受网络时序影响）
+  assertEq(r.serverDepth, r.sym, '服务端没订阅这条合约的盘口');
+  assertEq(r.futDepthState, 'ok', '合约盘口流没连上');
+  // 次断言：确实在推（宽松，容忍刚订阅上的抖动）
+  assert(r.mutations >= 1, `3 秒内盘口一次都没更新（rows=${r.rows} 消息增量=${r.msgsDelta}）`);
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();

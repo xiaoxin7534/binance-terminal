@@ -1339,14 +1339,6 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   background: var(--accent);
 }
 
-.grid.zoomed {
-  grid-template-columns: 1fr !important;
-  grid-template-rows: 1fr !important;
-  overflow: hidden;
-}
-.grid.zoomed > .cell { display: none; }
-.grid.zoomed > .cell.focus { display: flex; }
-
 
 /* 页签在窄容器里不要被压扁，交给外层横向滚动 */
 .tab-wrap .seg { width: max-content; }

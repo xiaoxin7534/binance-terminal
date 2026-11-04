@@ -560,7 +560,6 @@ export class BigChart {
       syncCrosshair() {},
       setFocus() {},
       openBig() {},
-      toggleZoom() {},
       onCellsChanged() {},
     };
     const cell = new Cell(stub, 0);
