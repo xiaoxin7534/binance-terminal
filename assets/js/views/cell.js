@@ -91,6 +91,7 @@ export class Cell {
     this.legendIdx = -1;
     this.ready = false;
     this.mounted = false;     // 图表是否已挂载（视野外只留格子外壳）
+    this.loadedKey = null;    // 当前 bars 属于哪个 symbol|interval
     this.loadingMore = false; // 正在往左拖加载更早的历史
     this.noMore = false;      // 已经到最早了，别再请求
     this.autoFit = true;      // 自动取景；用户手动拖动/缩放后置 false
@@ -614,18 +615,21 @@ export class Cell {
     const key = this.symbol + '|' + this.interval;
     // 先用缓存秒画（来回滚动时不至于每次都等接口）
     const hit = this.intraday ? null : KL_CACHE.get(key);
-    // 缓存够新就直接用，连接口都不用打（WS 会把最后一根实时补上）
-    if (hit && !silent && !this.bars.length && Date.now() - hit.ts < 30000) {
+    // 注意：这里不能判断 this.bars.length。
+    // 切周期时 bars 里还是**上一个周期**的数据（非空），
+    // 用「有没有数据」当条件会导致缓存永远不命中，切来切去每次都要重新请求。
+    const fresh = hit && Date.now() - hit.ts < 30000;
+    let painted = false;
+    if (hit && !silent) {
       this.errEl.classList.add('hidden');
       if (this.loadEl) this.loadEl.classList.add('hidden');
       this.applyKlines(hit.k, false);
-      return;
+      this.loadedKey = key;
+      painted = true;
+      if (fresh) return;            // 30 秒内的缓存直接用，连接口都不打
     }
-    if (hit && !silent && !this.bars.length) {
-      this.errEl.classList.add('hidden');
-      if (this.loadEl) this.loadEl.classList.add('hidden');
-      this.applyKlines(hit.k, false);       // 先画旧的，同时后台刷新
-    } else if (!silent && this.loadEl) {
+    // 只有真的没图可看时才盖「加载中」，切周期时保留旧图，等新数据替换
+    if (!silent && this.loadEl && !this.bars.length && !painted) {
       this.loadEl.classList.remove('hidden');
     }
     try {
@@ -639,9 +643,12 @@ export class Cell {
       if (this.intraday) {
         this.basePrice = res.o || 0;
         this.applyIntraday(res.k || [], silent);
+        this.loadedKey = key;
       } else {
         rememberKlines(key, res.k);
-        this.applyKlines(res.k, silent);
+        // 之前已经用旧缓存画过一版，这次静默替换，别把用户视野重置
+        this.applyKlines(res.k, silent || painted);
+        this.loadedKey = key;
       }
     } catch (e) {
       if (id !== this.reqId) return;

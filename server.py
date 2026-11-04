@@ -20,6 +20,7 @@ import base64
 import concurrent.futures
 import gzip
 import http.client
+import queue
 import json
 import os
 import queue
@@ -218,7 +219,7 @@ _opener_direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 _https_pool = {}                 # host -> [(conn, 最后使用时间), ...]
 _https_pool_lock = threading.Lock()
 HTTPS_IDLE_MAX = 25.0            # 空闲超过这么久就丢掉，币安那边可能已经关了
-HTTPS_POOL_MAX = 8
+HTTPS_POOL_MAX = 16
 
 
 def _https_take(host):
@@ -1276,6 +1277,15 @@ _klines_dirty = False
 _dirty_keys = set()
 _dirty_lock = threading.Lock()
 
+# 切周期是最常见的动作：第一次看某个币时，把其余周期排进队列预热
+OTHER_IVS = ["5m", "15m", "1h", "4h", "1d"]
+_prefetch_q = queue.Queue(maxsize=400)
+_seen_symbols = set()
+_seen_lock = threading.Lock()
+# 同一个 key 同时只允许一个请求在飞：预取和用户请求撞上时，后来的等前一个
+_inflight = {}
+_inflight_lock = threading.Lock()
+
 
 def _fetch_klines(perp, sym, iv, limit, start=None, end=None):
     """拉一段 K 线，返回 [[t, o, h, l, c, v, q], ...]
@@ -1358,7 +1368,7 @@ def get_klines_before(perp, sym, iv, limit, before):
     return raw
 
 
-def get_klines(perp, sym, iv, limit):
+def get_klines(perp, sym, iv, limit, prefetch=False):
     global _klines_dirty
     key = ("f:" if perp else "s:") + sym + "|" + iv
     step = IV_MS.get(iv, 60000)
@@ -1381,6 +1391,28 @@ def get_klines(perp, sym, iv, limit):
     if start is not None and (now * 1000 - start) / step > limit:
         start = None        # 落后太多，增量不划算，整段重拉
 
+    # 同一个 key 正在被别人拉（预取线程 / 另一个格子），等它拉完直接用结果，
+    # 否则两边同时打币安，用户反而等更久
+    with _inflight_lock:
+        ev = _inflight.get(key)
+        owner = ev is None
+        if owner:
+            ev = threading.Event()
+            _inflight[key] = ev
+
+    if not owner:
+        ev.wait(8)
+        with _klines_lock:
+            done = KLINES.get(key)
+        if done and len(done["bars"]) >= min(limit, 50):
+            return done["bars"][-limit:]
+        # 等的人失败了，自己再来一次
+        with _inflight_lock:
+            if key not in _inflight:
+                _inflight[key] = threading.Event()
+                owner = True
+                ev = _inflight[key]
+
     try:
         if start is None:
             # 首次多拉一些存着：用户往左拖、切大图都不用再打接口
@@ -1395,6 +1427,10 @@ def get_klines(perp, sym, iv, limit):
             need = int((now * 1000 - start) / step) + 3
             merged = _merge_bars(bars, _fetch_klines(perp, sym, iv, max(2, min(need, 500)), start))
     except Exception:           # noqa: BLE001
+        if owner:
+            with _inflight_lock:
+                _inflight.pop(key, None)
+            ev.set()
         if bars:
             log("K 线拉取失败，用缓存兜底: %s %s" % (sym, iv))
             return bars[-limit:]        # 网络抖的时候先看旧的，别白屏
@@ -1410,7 +1446,51 @@ def get_klines(perp, sym, iv, limit):
                 KLINES.pop(k, None)
     with _dirty_lock:
         _dirty_keys.add(key)
+    if not prefetch:
+        _maybe_prefetch_other(perp, sym, iv)
+    if owner:
+        with _inflight_lock:
+            _inflight.pop(key, None)
+        ev.set()
     return merged[-limit:]
+
+
+def _maybe_prefetch_other(perp, sym, iv):
+    """第一次看某个币时，把它其余几个周期排进预取队列。
+
+    用户切周期是最常见的动作，切之前备好就不用等那 1~2 秒。
+    每个币只排一次，队列满了就放弃。
+    """
+    sk = ("f:" if perp else "s:") + sym
+    with _seen_lock:
+        if sk in _seen_symbols:
+            return
+        _seen_symbols.add(sk)
+        if len(_seen_symbols) > 3000:
+            _seen_symbols.clear()
+    for o in OTHER_IVS:
+        if o == iv:
+            continue
+        try:
+            _prefetch_q.put_nowait((perp, sym, o))
+        except queue.Full:
+            return
+
+
+def kline_prefetch_worker():
+    """后台把队列里的周期一个个拉好；用户一有请求就让路"""
+    while True:
+        try:
+            perp, sym, iv = _prefetch_q.get(timeout=5)
+        except queue.Empty:
+            continue
+        while time.time() - LAST_USER_REQ < 1.5:
+            time.sleep(0.3)
+        try:
+            get_klines(perp, sym, iv, 500, prefetch=True)
+        except Exception:       # noqa: BLE001
+            pass
+        time.sleep(0.8)     # 间隔长一点，别和用户请求抢连接
 
 
 def prefetch_klines():
@@ -1985,6 +2065,7 @@ def build_server(host, port):
     load_listing()
     threading.Thread(target=load_klines, daemon=True).start()
     threading.Thread(target=kline_saver, daemon=True).start()
+    threading.Thread(target=kline_prefetch_worker, daemon=True).start()
     threading.Thread(target=prefetch_klines, daemon=True).start()
 
     detect_proxy()
