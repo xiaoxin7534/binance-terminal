@@ -811,10 +811,14 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   scrollbar-width: thin;
 }
 .dt-col:last-child { border-right: none; }
-/* 盘口三列数据最挤，给它多一点宽度 */
-.dt-col:nth-child(1) { flex: 1; }
-.dt-col:nth-child(2) { flex: 1.18; }
-.dt-col:nth-child(3) { flex: 0.92; }
+/* 第一列塞了头部+走势+14 项统计，给得最多；盘口三列数据次之 */
+.dt-col:nth-child(1) { flex: 1.12; }
+.dt-col:nth-child(2) { flex: 1.12; }
+.dt-col:nth-child(3) { flex: 0.9; }
+/* 头部和走势现在在列里，内边距收一点 */
+.dt-col .dt-head { padding: 12px 12px 10px; }
+.dt-col .dt-chart { height: 78px; }
+.dt-col .dt-section { padding: 10px 12px; }
 .dt-col .dt-section { border-bottom: none; }
 .dt-head {
   padding: 14px 14px 12px;

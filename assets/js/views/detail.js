@@ -206,6 +206,8 @@ export class DetailPanel {
       basisCls = Math.abs(b) < 0.005 ? 'flat' : dirClass(b);
     }
     this.root.innerHTML = `
+      <div class="dt-cols">
+      <div class="dt-col">
       <div class="dt-head">
         <div class="dt-title">
           <h3>${base}<span style="font-size:11px;color:var(--muted)">/${info.quote}</span></h3>
@@ -237,8 +239,6 @@ export class DetailPanel {
         <div class="dt-chart" data-role="chart"></div>
         <span class="dt-chart-tag">近 2 小时</span>
       </div>
-      <div class="dt-cols">
-      <div class="dt-col">
       <div class="dt-section">
         <h4>行情统计<span class="cd" data-role="cd"></span><span class="line"></span></h4>
         <div class="kv-grid">
