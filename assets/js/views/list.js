@@ -220,9 +220,13 @@ export class ListView {
     this.sectorBar.innerHTML = parts.join('');
   }
 
-  /** 板块 chip 上的平均涨跌幅随行情刷新（只改文本，不重建 DOM） */
-  updateSectorChg() {
+  /** 板块 chip 上的平均涨跌幅随行情刷新（只改文本，不重建 DOM）
+   *  6 秒一次就够——每 2 秒跑一遍等于把全表多遍历一次 */
+  updateSectorChg(force) {
     if (!this.sectorBar || !this.sectorBar.firstChild) return;
+    const now = Date.now();
+    if (!force && now - (this.sectorChgAt || 0) < 6000) return;
+    this.sectorChgAt = now;
     const st = this.sectorStats();
     this.sectorBar.querySelectorAll('[data-sec-chg]').forEach((el) => {
       const a = st.avg[el.dataset.secChg] || 0;

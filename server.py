@@ -198,6 +198,7 @@ def fapi_get(path, timeout=25):
 
 _cache = {}
 _cache_lock = threading.Lock()
+LAST_USER_REQ = 0.0          # 最后一次浏览器请求的时间，预取靠它判断「用户现在忙不忙」
 _opener_env = urllib.request.build_opener()
 _opener_direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -1180,7 +1181,7 @@ IV_MS = {
 }
 KLINE_TTL = 30.0           # 这么新的缓存直接返回，不打接口（前端 WS 会实时补最后一根）
 KLINE_KEEP = 3000          # 单条序列最多留多少根
-KLINE_MAX_SERIES = 240     # 最多缓存多少条序列
+KLINE_MAX_SERIES = 480     # 最多缓存多少条序列（约 15MB，够覆盖常用币的多个周期）
 KLINES = {}
 _klines_lock = threading.Lock()
 _klines_dirty = False
@@ -1254,6 +1255,49 @@ def get_klines(perp, sym, iv, limit):
                 KLINES.pop(k, None)
     _klines_dirty = True
     return merged[-limit:]
+
+
+def prefetch_klines():
+    """后台预热默认格子的 1m K 线。
+
+    用户第一次打开某个币的图，服务端要现去币安拉 500 根，1~3 秒。
+    启动后先把默认那 12 个拉好，页面打开时直接命中缓存（5ms）。
+    3 个线程并发、每个之间歇 200ms，别把带宽和代理吃满。
+    """
+    # 等首屏那 8 个 K 线请求先跑完，别跟用户抢带宽
+    time.sleep(6)
+    # 默认格子 + 成交额前 40（现货和合约都算），用户随手点一个多半已经备好了
+    queue = list(SEED_SYMBOLS[:12])
+    with HUB.lock:
+        ranked = sorted(HUB.tickers.items(), key=lambda kv: -(kv[1].get("qv") or 0))
+        top = [k for k, _ in ranked][:40]
+    for sym in top:
+        if sym not in queue:
+            queue.append(sym)
+    lock = threading.Lock()
+
+    def worker():
+        while True:
+            with lock:
+                if not queue:
+                    return
+                sym = queue.pop(0)
+            key = "s:" + sym + "|1m"
+            with _klines_lock:
+                ent = KLINES.get(key)
+            if ent and time.time() - ent["ts"] < 20:
+                continue            # 已经有新鲜的，别重复拉
+            # 用户一有请求就让路，别把带宽和代理抢走
+            while time.time() - LAST_USER_REQ < 2.0:
+                time.sleep(0.4)
+            try:
+                get_klines(False, sym, "1m", 500)
+            except Exception:       # noqa: BLE001
+                pass
+            time.sleep(0.4)
+
+    for _ in range(3):
+        threading.Thread(target=worker, daemon=True).start()
 
 
 def load_klines():
@@ -1350,8 +1394,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self, obj, status=200):
         body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode()
+        enc = ""
+        # 行情快照 450KB，压完约 60KB；本地传输省得有限，但浏览器解析明显快
+        if len(body) > 8192 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            body = gzip.compress(body, 5)
+            enc = "gzip"
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if enc:
+            self.send_header("Content-Encoding", enc)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -1364,6 +1415,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------------
     def do_GET(self):
+        global LAST_USER_REQ
+        LAST_USER_REQ = time.time()
         u = urlparse(self.path)
         try:
             if u.path == "/api/stream":
@@ -1688,6 +1741,7 @@ def build_server(host, port):
     load_sectors()
     load_listing()
     threading.Thread(target=load_klines, daemon=True).start()
+    threading.Thread(target=prefetch_klines, daemon=True).start()
 
     detect_proxy()
     global FUTURES, FUT_DEPTH

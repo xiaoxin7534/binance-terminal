@@ -469,6 +469,10 @@ function bindToolbar() {
 async function boot() {
   applyTheme(state.theme, false);
 
+  // 行情快照先发出去。GridView 一构造就会给 8 个格子发 K 线请求，
+  // 不抢先发的话 /api/market 会被挤到第 9 位，表头数字要等 1 秒才出来。
+  const marketReq = api.market();
+
   grid = new GridView($('#grid'), {
     onCellsChanged: syncSubs,
     // 图表墙的板块选择会改写 mkt/tab/sector，列表要跟着刷新
@@ -544,9 +548,9 @@ async function boot() {
   setGridDetail(state.detailOpen);
   grid.cells.forEach((c) => c.syncTools());
 
-  // 首屏行情
+  // 首屏行情（上面已经发出去了）
   try {
-    const data = await api.market();
+    const data = await marketReq;
     seedMarket(data.rows);
     setSectorLabels(data.labels);
     buildTape();
