@@ -91,6 +91,8 @@ export class Cell {
     this.legendIdx = -1;
     this.ready = false;
     this.mounted = false;     // 图表是否已挂载（视野外只留格子外壳）
+    this.loadingMore = false; // 正在往左拖加载更早的历史
+    this.noMore = false;      // 已经到最早了，别再请求
     this.autoFit = true;      // 自动取景；用户手动拖动/缩放后置 false
     this.fitTimer = 0;
 
@@ -471,6 +473,12 @@ export class Cell {
       if (this.disposed) return;
       if (range && state.sync) this.view.syncRange(this, range);
     });
+
+    // 拖到左边缘就自动补更早的历史（大图里 500 根铺不满时会立刻触发一次）
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (this.disposed || !range) return;
+      if (range.from < 40 && !this.loadingMore && !this.noMore) this.loadMore();
+    });
   }
 
   layoutLegends() {
@@ -512,6 +520,8 @@ export class Cell {
     this.ready = false;
     this.autoFit = true;
     this.failCount = 0;
+    this.noMore = false;
+    this.loadingMore = false;
     if (!this.detached) {
       state.cells[this.index] = sym;
       save();
@@ -535,6 +545,8 @@ export class Cell {
     const wasIntraday = this.interval === 'time';
     this.interval = iv;
     this.autoFit = true;
+    this.noMore = false;
+    this.loadingMore = false;
     this.syncTools();
     // 分时和 K 线是两种图（折线 vs 蜡烛），切换时必须重建
     if (this.mounted && wasIntraday !== (iv === 'time')) {
@@ -756,6 +768,42 @@ export class Cell {
     apply(0);
   }
 
+  /** 往左拖到边缘时，往前补一段历史（服务端会把它并进磁盘缓存） */
+  async loadMore() {
+    if (this.loadingMore || this.noMore || this.intraday) return;
+    if (!this.bars.length || !this.chart) return;
+    const before = this.bars[0][0];
+    const id = this.reqId;
+    this.loadingMore = true;
+    try {
+      const res = await api.klines(this.symbol, this.interval, BAR_LIMIT, before);
+      if (id !== this.reqId || this.disposed || !this.chart) return;
+      const more = res.k || [];
+      if (!more.length) {
+        this.noMore = true;
+        return;
+      }
+      // 注意：币安按 endTime 返回会少一根（边界那根已在缓存里），
+      // 不能用「少于 limit」判断到头了，只能等它返回空数组
+      const merged = more.concat(this.bars);
+      // 记住当前视野，合并后整体右移新增的根数，别让画面跳
+      const vr = this.chart.timeScale().getVisibleLogicalRange();
+      this.applyKlines(merged, true);
+      if (vr) {
+        try {
+          this.chart.timeScale().setVisibleLogicalRange({
+            from: vr.from + more.length,
+            to: vr.to + more.length,
+          });
+        } catch (e) { /* ignore */ }
+      }
+    } catch (e) {
+      /* 网络抖动就算了，下次拖到边缘还会再试 */
+    } finally {
+      this.loadingMore = false;
+    }
+  }
+
   /** 尺寸变化后重新取景（用户手动拖动/缩放过就不再自动跳） */
   scheduleFit() {
     clearTimeout(this.fitTimer);
@@ -845,7 +893,7 @@ export class Cell {
       this.times.push(t);
       this.bars.push([d[0], d[1], d[2], d[3], d[4], d[5], d[6]]);
       this.closes.push(d[4]);
-      if (this.times.length > BAR_LIMIT + 200) {
+      if (this.times.length > 3000) {
         this.times.shift();
         this.bars.shift();
         this.closes.shift();

@@ -1277,12 +1277,19 @@ _dirty_keys = set()
 _dirty_lock = threading.Lock()
 
 
-def _fetch_klines(perp, sym, iv, limit, start=None):
-    """拉一段 K 线，返回 [[t, o, h, l, c, v, q], ...]"""
+def _fetch_klines(perp, sym, iv, limit, start=None, end=None):
+    """拉一段 K 线，返回 [[t, o, h, l, c, v, q], ...]
+
+    start：从这个时间往后拉（增量补）
+    end：拉这个时间之前的（用户往左拖加载历史）
+    """
     if perp:
         path = "/fapi/v1/klines?symbol=%s&interval=%s&limit=%d" % (sym, iv, limit)
         if start:
             path += "&startTime=%d" % start
+        if end:
+            path += "&endTime=%d" % end
+        if start or end:
             raw = json.loads(fapi_get(path, 30))
         else:
             raw = json.loads(cached_fapi(path, 2, 30))
@@ -1290,6 +1297,9 @@ def _fetch_klines(perp, sym, iv, limit, start=None):
         path = "/api/v3/klines?symbol=%s&interval=%s&limit=%d" % (sym, iv, limit)
         if start:
             path += "&startTime=%d" % start
+        if end:
+            path += "&endTime=%d" % end
+        if start or end:
             raw = json.loads(http_get(path))
         else:
             raw = json.loads(cached_get(path, 2))
@@ -1305,6 +1315,47 @@ def _merge_bars(old, new):
     for b in new:
         d[b[0]] = b
     return [d[t] for t in sorted(d)]
+
+
+def get_klines_before(perp, sym, iv, limit, before):
+    """拉 before 之前的 limit 根，并合并进缓存。返回 [[...], ...]（可能为空=到头了）"""
+    key = ("f:" if perp else "s:") + sym + "|" + iv
+    with _klines_lock:
+        ent = KLINES.get(key)
+    if ent is None:
+        ent = _read_disk(key)
+        if ent:
+            with _klines_lock:
+                KLINES[key] = ent
+    bars = ent["bars"] if ent else []
+    before = int(before)
+
+    # 缓存里已经有比 before 更早的，直接切一段给它，连接口都不用打。
+    # （服务端缓存可能比前端手上那批厚得多：前端 500 根，缓存 1500 根）
+    if bars and bars[0][0] < before:
+        earlier = [b for b in bars if b[0] < before]
+        if earlier:
+            return earlier[-limit:]
+
+    try:
+        raw = _fetch_klines(perp, sym, iv, limit, end=before)
+    except Exception:           # noqa: BLE001
+        return []
+    if not raw:
+        return []
+    # 币安按 endTime 返回时包含边界那根，裁掉（它在缓存里已经有了）
+    raw = [b for b in raw if b[0] < before]
+    if not raw:
+        return []               # 到最早了
+
+    merged = _merge_bars(raw, bars)
+    if len(merged) > KLINE_KEEP:
+        merged = merged[-KLINE_KEEP:]
+    with _klines_lock:
+        KLINES[key] = {"ts": time.time(), "bars": merged}
+    with _dirty_lock:
+        _dirty_keys.add(key)
+    return raw
 
 
 def get_klines(perp, sym, iv, limit):
@@ -1691,6 +1742,10 @@ class Handler(BaseHTTPRequestHandler):
         sym = sym[:-2] if perp else sym.upper()
         iv = (qs.get("interval") or ["1m"])[0]
         limit = min(int((qs.get("limit") or ["400"])[0]), 1000)
+        before = qs.get("before")
+        if before:
+            out = get_klines_before(perp, sym, iv, limit, int(before[0]))
+            return self._json({"symbol": sym, "interval": iv, "k": out, "more": bool(out)})
         out = get_klines(perp, sym, iv, limit)
         self._json({"symbol": sym, "interval": iv, "k": out})
 

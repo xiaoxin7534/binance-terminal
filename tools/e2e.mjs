@@ -514,6 +514,25 @@ test('大图：持仓量叠加（pane 2）', async (s) => {
   assert(r.after < 3, '关掉持仓量后窗格没减少');
 });
 
+test('K 线：拖到左边缘自动补更早的历史', async (s) => {
+  const r = await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,600));
+    const c = window.__term.grid.cells[0];
+    if (!c || !c.chart) return { skip: true };
+    const before = c.times.length;
+    const earliest = c.times[0];
+    c.chart.timeScale().setVisibleLogicalRange({ from: -20, to: 60 });
+    await new Promise(r=>setTimeout(r,4000));
+    return { before, after: c.times.length, added: c.times.length - before,
+             newEarliest: c.times[0], wentBack: c.times[0] < earliest,
+             noMore: c.noMore };
+  `);
+  if (r.skip) return;
+  assert(r.added > 0, `拖到左边缘没加载历史（还是 ${r.after} 根）`);
+  assert(r.wentBack, '加载回来的数据不比原来的更早');
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();

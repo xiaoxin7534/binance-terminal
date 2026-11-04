@@ -8,8 +8,9 @@ const json = async (url) => {
 
 export const api = {
   market: () => json('/api/market'),
-  klines: (symbol, interval, limit = 400) =>
-    json(`/api/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`),
+  klines: (symbol, interval, limit = 400, before = 0) =>
+    json(`/api/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`
+      + (before ? `&before=${before}` : '')),
   depth: (symbol, limit = 20) =>
     json(`/api/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),
   trades: (symbol, limit = 30) =>
