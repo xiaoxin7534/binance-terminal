@@ -787,40 +787,27 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 
 /* ------------------------------------------------------------- 详情栏 */
 .detail {
-  /* 三个区块左中右并排，所以要宽一些；窄屏按 46vw 收 */
-  width: min(660px, 46vw);
-  flex: 0 0 min(660px, 46vw);
+  width: 336px;
+  flex: 0 0 336px;
   border-left: 1px solid var(--border);
   background: var(--panel);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-/* 头部 + 迷你走势横跨整行，下面三列各自滚动 */
+/* 一列竖排：整块自己滚，各 section 之间靠 border-bottom 分隔 */
 .dt-cols {
   flex: 1;
   min-height: 0;
   display: flex;
-}
-.dt-col {
-  flex: 1 1 0;
-  min-width: 0;
+  flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
-  border-right: 1px solid var(--border);
   scrollbar-width: thin;
 }
-.dt-col:last-child { border-right: none; }
-/* 两列均分：左=信息（头部/走势/统计），右=市场（盘口 + 成交） */
-.dt-col:nth-child(1) { flex: 1; }
-.dt-col:nth-child(2) { flex: 1; }
-/* 头部和走势现在在列里，内边距收一点 */
-.dt-col .dt-head { padding: 12px 12px 10px; }
-.dt-col .dt-chart { height: 78px; }
-.dt-col .dt-section { padding: 10px 12px; }
-/* 右列内部：盘口在上、成交在下，用一条分隔线断开 */
-.dt-col:nth-child(2) .dt-section + .dt-section {
-  border-top: 1px solid var(--border);
+.dt-col {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 .dt-col .dt-section { border-bottom: none; }
 .dt-head {

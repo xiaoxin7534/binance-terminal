@@ -283,6 +283,7 @@ test('详情面板：三块并排 + 盘口上下竖置', async (s) => {
     const cols = [...p.querySelectorAll('.dt-col')];
     return {
       cols: cols.length,
+      stacked: cols.length > 1 && cols[1].getBoundingClientRect().top > cols[0].getBoundingClientRect().top + 10,
       titles: cols.map(c => [...c.querySelectorAll('h4')].map(e => e.textContent.trim()).join('|')),
       head: [...p.querySelectorAll('.book-head span')].map(e => e.textContent),
       asks: p.querySelectorAll('.book-row.ask').length,
@@ -291,10 +292,10 @@ test('详情面板：三块并排 + 盘口上下竖置', async (s) => {
       ratio: !!p.querySelector('.book-ratio'),
     };
   `);
-  assertEq(r.cols, 2, '详情面板不是两列');
-  assert(r.titles[0].includes('行情统计'), '第一列不是行情统计');
+  assert(r.stacked, '详情面板应该是竖排一列');
+  assert(r.titles[0].includes('行情统计'), '第一块不是行情统计');
   assert(r.titles[1].includes('盘口') && r.titles[1].includes('最近成交'),
-    '第二列应该同时有盘口和最近成交：' + r.titles[1]);
+    '第二块应该同时有盘口和最近成交：' + r.titles[1]);
   assertEq(r.head.join(','), '价格,数量,合计', '盘口表头不对');
   assertEq(r.asks, 10, '卖档不是 10');
   assertEq(r.bids, 10, '买档不是 10');

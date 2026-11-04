@@ -55,6 +55,11 @@ function load() {
       saved.bcDetailOpen = true;
       saved.uiV = 2;
     }
+    // v3：详情面板改回一列，之前拖宽的像素值作废
+    if (!saved.uiV || saved.uiV < 3) {
+      saved.detailWidth = 0;
+      saved.uiV = 3;
+    }
     return {
       ...DEFAULTS, ...saved,
       indicators: { ...DEFAULTS.indicators, ...(saved.indicators || {}) },
@@ -82,7 +87,7 @@ export function save() {
         detailOpen: state.detailOpen,
         selected: state.selected, mkt: state.mkt, tab: state.tab, sector: state.sector,
         gridSector: state.gridSector, colOrder: state.colOrder, sort: state.sort,
-        alert: state.alert, uiV: 2,
+        alert: state.alert, uiV: 3,
         listDetailOpen: state.listDetailOpen, detailWidth: state.detailWidth,
       }));
     } catch (e) { /* 隐私模式下忽略 */ }
