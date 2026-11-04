@@ -161,8 +161,9 @@ export class Alerts {
     if (!this.listEl) return;
     const thr = Math.abs(state.alert.thr || 0.05);
     if (!this.hits.length) {
+      // 别写「暂无超阈值的合约」——超阈值的一大把，只是没「新突破」而已
       this.listEl.innerHTML = `<div class="al-empty">${state.alert.on
-        ? `正在盯着，暂无 |费率| ≥ ${thr}% 的合约`
+        ? `正在盯着：只报新突破 ±${thr}% 的合约<br><span style="opacity:.7">当前已超阈值的不会重复提醒，去扫描器看全量</span>`
         : '告警未开启'}</div>`;
       return;
     }
