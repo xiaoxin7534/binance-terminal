@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>币安看盘终端</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0b90b'/%3E%3Cpath d='M16 6l3 3-3 3-3-3 3-3zm-6 6l3 3-3 3-3-3 3-3zm12 0l3 3-3 3-3-3 3-3zm-6 6l3 3-3 3-3-3 3-3z' fill='%23222'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+
+<div class="app">
+  <!-- ======================= 顶栏 ======================= -->
+  <header class="topbar">
+    <button class="icon-btn" id="btn-watch" title="显示/隐藏自选栏 ( [ )">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+        <rect x="3" y="4" width="18" height="16" rx="2.5"/>
+        <path d="M9 4v16"/>
+      </svg>
+    </button>
+
+    <div class="brand">
+      <svg width="18" height="18" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="#f0b90b"/>
+        <path d="M16 6l3 3-3 3-3-3 3-3zm-6 6l3 3-3 3-3-3 3-3zm12 0l3 3-3 3-3-3 3-3zm-6 6l3 3-3 3-3-3 3-3z" fill="#1b1f26"/>
+      </svg>
+      看盘终端
+      <em>Binance Spot</em>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button data-view="grid" class="on">多品种同列</button>
+      <button data-view="list">行情列表</button>
+    </nav>
+
+    <div class="spacer"></div>
+
+    <div class="conn off" id="conn"><i></i><span>连接中</span></div>
+
+    <button class="icon-btn" id="btn-theme" title="切换深浅色 (T)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- ======================= 行情条 ======================= -->
+  <div class="tape" id="tape"></div>
+
+  <!-- ======================= 主体 ======================= -->
+  <main class="main">
+
+    <!-- ---------------- 自选栏 ---------------- -->
+    <aside class="watch" id="watch">
+      <div class="watch-head">
+        <span class="wh-title">自选</span>
+        <button class="icon-btn wh-add" id="watch-add" title="添加自选">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <div class="watch-list" id="watch-list"></div>
+      <div class="watch-foot" id="watch-foot">
+        <span class="muted">点代码看行情，<b>双击</b>换图</span>
+      </div>
+    </aside>
+
+    <!-- ---------------- 图表墙 ---------------- -->
+    <section class="view" id="view-grid">
+      <div class="toolbar">
+        <div class="tb-group">
+          <span class="tb-label">布局</span>
+          <div class="seg" id="layout-seg">
+            <button data-layout="1x1" title="单图">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x=".6" y=".6" width="12.8" height="12.8" rx="1.5"/></svg>
+            </button>
+            <button data-layout="1x2" title="左右双图">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x=".6" y=".6" width="12.8" height="12.8" rx="1.5"/><path d="M7 .6v12.8"/></svg>
+            </button>
+            <button data-layout="2x2" title="2×2">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x=".6" y=".6" width="12.8" height="12.8" rx="1.5"/><path d="M7 .6v12.8M.6 7h12.8"/></svg>
+            </button>
+            <button data-layout="3x2" title="3×2">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x=".6" y=".6" width="12.8" height="12.8" rx="1.5"/><path d="M4.87 .6v12.8M9.13 .6v12.8M.6 7h12.8"/></svg>
+            </button>
+            <button data-layout="4x2" title="4×2">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x=".6" y=".6" width="12.8" height="12.8" rx="1.5"/><path d="M3.8 .6v12.8M7 .6v12.8M10.2 .6v12.8M.6 7h12.8"/></svg>
+            </button>
+            <button data-layout="3x3" title="3×3">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x=".6" y=".6" width="12.8" height="12.8" rx="1.5"/><path d="M4.87 .6v12.8M9.13 .6v12.8M.6 4.87h12.8M.6 9.13h12.8"/></svg>
+            </button>
+            <button data-layout="4x3" title="4×3（12 图，可滚动）">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x=".6" y=".6" width="12.8" height="12.8" rx="1.5"/><path d="M3.8 .6v12.8M7 .6v12.8M10.2 .6v12.8M.6 4.87h12.8M.6 9.13h12.8"/></svg>
+            </button>
+            <button data-layout="4x4" title="4×4（16 图，可滚动）">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x=".6" y=".6" width="12.8" height="12.8" rx="1.5"/><path d="M3.8 .6v12.8M7 .6v12.8M10.2 .6v12.8M.6 3.8h12.8M.6 7h12.8M.6 10.2h12.8"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="tb-group">
+          <span class="tb-label">板块</span>
+          <button class="sector-select" id="grid-sector-btn" title="按板块批量填充所有图表">
+            <span id="grid-sector-name">全部</span>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+
+        <div class="tb-group">
+          <span class="tb-label">行数</span>
+          <button class="sector-select" id="grid-rows-btn" title="图表墙往下铺多少行，超出一屏可滚动查看">
+            <span id="grid-rows-name">跟随布局</span>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+
+        <div class="tb-group">
+          <span class="tb-label">周期</span>
+          <div class="seg blue" id="interval-seg">
+            <button data-iv="time">分时</button>
+            <button data-iv="1m">1分</button>
+            <button data-iv="5m">5分</button>
+            <button data-iv="15m">15分</button>
+            <button data-iv="1h">1时</button>
+            <button data-iv="4h">4时</button>
+            <button data-iv="1d">日线</button>
+          </div>
+        </div>
+
+        <div class="tb-group">
+          <span class="tb-label">指标</span>
+          <button class="chip on" data-ind="ma">均线</button>
+          <button class="chip on" data-ind="vol">成交量</button>
+          <button class="chip on" data-ind="macd">MACD</button>
+          <button class="chip" data-ind="boll">BOLL</button>
+        </div>
+
+        <div class="tb-spacer"></div>
+
+        <label class="switch" title="所有图表的可视区间与十字光标保持同步">
+          <input type="checkbox" id="sync-range" checked>
+          <span class="track"></span>
+          <span>联动</span>
+        </label>
+
+        <label class="switch" title="右侧显示当前选中格子的盘口与合约数据 (D)">
+          <input type="checkbox" id="grid-detail-switch">
+          <span class="track"></span>
+          <span>详情</span>
+        </label>
+      </div>
+
+      <div class="grid-wrap" id="grid-wrap">
+        <div class="grid" id="grid"></div>
+        <aside class="detail dt-side" id="grid-detail"></aside>
+      </div>
+    </section>
+
+    <!-- ---------------- 行情列表 ---------------- -->
+    <section class="view view-list hidden" id="view-list">
+      <div class="list-main">
+        <div class="list-toolbar">
+          <input class="search" id="list-search" placeholder="搜索币种，如 BTC / PEPE">
+          <div class="seg mkt" id="list-mkt">
+            <button data-m="all" class="on">全部</button>
+            <button data-m="spot">现货</button>
+            <button data-m="perp">永续</button>
+          </div>
+          <span class="vdiv"></span>
+          <div class="tab-wrap">
+            <div class="seg" id="list-tab">
+              <button data-t="all" class="on">全部</button>
+              <button data-t="fav">自选</button>
+              <button data-t="new">新币上线</button>
+              <button data-t="crypto">Crypto</button>
+              <button data-t="tradfi">TradFi</button>
+              <button data-t="preipo">Pre-IPO</button>
+              <button data-t="premarket">Pre-Market</button>
+              <button data-t="usdc">USDC</button>
+              <button data-t="chinese">Chinese</button>
+            </div>
+          </div>
+          <div class="tb-spacer"></div>
+          <div class="seg" id="list-sort">
+            <button data-s="gain">涨幅</button>
+            <button data-s="lose">跌幅</button>
+          </div>
+          <span class="muted" id="list-count"></span>
+        </div>
+        <div class="sector-bar" id="sector-bar"></div>
+
+        <div class="table">
+          <div class="table-scroll" id="table-scroll">
+            <div class="thead" id="thead"></div>
+            <div class="tbody" id="tbody">
+              <div class="tbody-inner" id="tbody-inner"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="detail" id="detail">
+        <div class="dt-empty">选择左侧任意币种<br>查看盘口与明细</div>
+      </aside>
+    </section>
+
+  </main>
+</div>
+
+<!-- ======================= 大图模式 ======================= -->
+<div class="bigchart hidden" id="bigchart">
+  <div class="bc-bar">
+    <button class="icon-btn bc-back" id="bc-back" title="返回多品种同列 (Esc)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+
+    <div class="bc-title">
+      <h3 id="bc-sym">--</h3>
+      <span class="bc-quote" id="bc-quote">/USDT</span>
+      <span class="bc-tag" id="bc-tag" hidden>永续</span>
+    </div>
+
+    <div class="bc-quote-box">
+      <span class="bc-px" id="bc-px">--</span>
+      <span class="bc-chg" id="bc-chg">--</span>
+    </div>
+
+    <span class="vdiv"></span>
+
+    <div class="seg blue" id="bc-iv">
+      <button data-iv="time">分时</button>
+      <button data-iv="1m">1分</button>
+      <button data-iv="5m">5分</button>
+      <button data-iv="15m">15分</button>
+      <button data-iv="1h">1时</button>
+      <button data-iv="4h">4时</button>
+      <button data-iv="1d">日线</button>
+    </div>
+
+    <div class="bc-ind" id="bc-ind">
+      <button class="chip" data-bind="ma">均线</button>
+      <button class="chip" data-bind="vol">成交量</button>
+      <button class="chip" data-bind="macd">MACD</button>
+      <button class="chip" data-bind="boll">BOLL</button>
+    </div>
+
+    <div class="tb-spacer"></div>
+
+    <div class="bc-draw" id="bc-draw">
+      <button data-tool="cursor" class="on" title="光标：点选图元后按 Delete 删除">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3l14 8-6 1.6L10.4 19z"/></svg>
+      </button>
+      <button data-tool="trend" title="趋势线">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 19L20 5"/><circle cx="4" cy="19" r="1.7" fill="currentColor"/><circle cx="20" cy="5" r="1.7" fill="currentColor"/></svg>
+      </button>
+      <button data-tool="hline" title="水平线">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12h18"/></svg>
+      </button>
+      <button data-tool="rect" title="矩形">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="6" width="16" height="12" rx="1"/></svg>
+      </button>
+      <button data-tool="fib" title="斐波那契回撤">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 5h16M4 9.8h16M4 14.6h16M4 19.4h16" stroke-dasharray="2 2"/><path d="M4 5v14.4" stroke-width="1"/></svg>
+      </button>
+      <span class="bc-draw-sep"></span>
+      <button data-tool="undo" title="删除选中的图元 (Delete)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M9 7V4.8h6V7M6.5 7l.9 12.2h9.2L17.5 7"/></svg>
+      </button>
+      <button data-tool="clear" title="清除当前品种的全部绘图">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <button class="icon-btn" id="bc-close" title="关闭 (Esc)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+
+  <div class="bc-info" id="bc-info"></div>
+  <div class="bc-body" id="bc-body"></div>
+</div>
+
+<div id="splash">
+  <div class="splash-box">
+    <div class="ring"></div>
+    <p>正在连接币安行情…</p>
+  </div>
+</div>
+
+<script src="assets/js/vendor/lightweight-charts.standalone.production.js"></script>
+<script type="module" src="assets/js/app.js"></script>
+</body>
+</html>

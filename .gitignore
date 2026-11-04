@@ -1,0 +1,14 @@
+# 运行时与构建产物，不进版本库
+__pycache__/
+*.py[cod]
+build/
+dist/
+cache/
+backup/
+.venv/
+
+# 日志与临时文件
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
