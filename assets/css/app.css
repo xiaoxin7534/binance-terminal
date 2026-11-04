@@ -1510,7 +1510,7 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 .bc-info b { font-family: var(--mono); font-weight: 500; color: var(--text-2); }
 .bc-info .bi-time { color: var(--text-2); font-family: var(--mono); }
 
-.bc-body { flex: 1; min-height: 0; display: flex; }
+.bc-body { flex: 1; min-height: 0; display: flex; position: relative; }
 .bc-body > .cell { position: relative; flex: 1; min-width: 0; }
 .bc-body.dt-off > .bc-detail { display: none; }
 .bc-detail {
@@ -1804,3 +1804,30 @@ kbd {
   from { background-position: 160% 0; }
   to { background-position: -60% 0; }
 }
+
+/* 大图右上角：图形复位 */
+.bc-reset {
+  position: absolute;
+  top: 8px;
+  right: 72px;
+  z-index: 7;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(4px);
+  opacity: .82;
+  transition: opacity .14s, color .14s, background .14s;
+}
+.bc-reset:hover { opacity: 1; color: var(--text); background: var(--panel); }
+.bc-reset.spin svg { animation: resetSpin .42s ease-out; }
+@keyframes resetSpin {
+  from { transform: rotate(-120deg) scale(.8); opacity: .4; }
+  to { transform: none; opacity: 1; }
+}
+/* 用户拖过图、已经偏离自动取景时，按钮常亮提示可以复位 */
+.bc-reset.off { opacity: 1; color: var(--accent); border-color: rgba(37, 99, 235, .35); }

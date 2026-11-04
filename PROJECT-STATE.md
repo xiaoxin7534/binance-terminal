@@ -419,6 +419,23 @@ binance-terminal/
 **已经排除的**：主线程不卡。静置 20 秒只有 1 个 60ms 长任务，切视图约 50ms，
 长墙滚动 16ms/帧。所以「不流畅」只可能是等网络，不是渲染。
 
+### 图形复位 + Shift 测量（2026-11-04 晚）
+
+**复位按钮**：大图右上角（`.bc-reset`，`position:absolute; right:72px`），
+点一下 `cell.autoFit = true` + `fitRange()`，回到「K 线铺满 + 最后一根贴右」。
+用户拖动过图之后 `autoFit` 变 false，按钮会常亮成蓝色提示「已经偏离，可以复位」。
+快捷键 `R`。
+
+**Shift + 拖动测量**：不用切工具，按住 Shift 在图上拖，画一个半透明矩形，
+标签显示 `涨跌幅% / 价格差` 和 `N 根 · 时间跨度`。涨绿跌红。
+松开保留结果，点一下图表清除；换币/换周期也会清。
+
+**两个坑**：
+1. `render()` 开头有 `if (!this.items.length && !this.draft) return;`，
+   测量框既不是 items 也不是 draft，直接被跳过 → 条件里补 `&& !this.measure`。
+2. `.bc-body` 是 `display:flex` 但没写 `position`，里面的 `absolute` 按钮
+   一直定位到 `.bigchart`（fixed）上，跑到工具栏里去了 → 补 `position: relative`。
+
 ### 切周期为什么慢，怎么修的（2026-11-04 23:55）
 
 用户反馈「切换各个周期还是加载好久」。查下来是三个问题叠在一起：

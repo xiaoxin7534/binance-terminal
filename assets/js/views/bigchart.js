@@ -19,6 +19,18 @@ const wsIv = (iv) => (iv === 'time' ? '1m' : iv);
 const pad2 = (n) => String(n).padStart(2, '0');
 
 const TOOLS = ['cursor', 'trend', 'hline', 'rect', 'fib'];
+const IV_SEC = { time: 60, '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
+
+/** 秒数 → 3h12m / 45m / 2d */
+function fmtSpan(sec) {
+  if (sec >= 86400) return Math.round(sec / 86400) + 'd';
+  if (sec >= 3600) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.round((sec % 3600) / 60);
+    return h + 'h' + String(m).padStart(2, '0') + 'm';
+  }
+  return Math.round(sec / 60) + 'm';
+}
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
 
 function loadDrawings() {
@@ -59,6 +71,9 @@ class DrawLayer {
     this.key = '';
     this.raf = 0;
     this.undoStack = [];
+    this.measure = null;      // Shift+拖动 量出来的区间
+    this.measuring = false;
+    this.measureAt = 0;       // 松手时间，防止紧接着的 click 把结果清掉
 
     this.onDown = this.onDown.bind(this);
     this.onMove = this.onMove.bind(this);
@@ -124,6 +139,8 @@ class DrawLayer {
     const all = loadDrawings();
     this.items = Array.isArray(all[key]) ? all[key].slice() : [];
     this.sel = -1;
+    this.measure = null;
+    this.measuring = false;
     this.schedule();
   }
 
@@ -187,6 +204,16 @@ class DrawLayer {
     const pt = this.pointAt(e);
     if (!pt) return;
 
+    // Shift + 拖动 = 量涨跌幅（优先级高于绘图工具和图表平移）
+    if (e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.measure = { p1: pt, p2: { t: pt.t, p: pt.p } };
+      this.measuring = true;
+      this.schedule();
+      return;
+    }
+
     // 光标模式：抓住端点就拖动改图元，否则交给图表平移
     if (!this.tool) {
       const box = this.host.getBoundingClientRect();
@@ -209,6 +236,15 @@ class DrawLayer {
   }
 
   onMove(e) {
+    if (this.measuring && this.measure) {
+      const pt = this.pointAt(e);
+      if (!pt) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.measure.p2 = pt;
+      this.schedule();
+      return;
+    }
     if (this.drag) {
       const pt = this.pointAt(e);
       if (!pt) return;
@@ -237,6 +273,18 @@ class DrawLayer {
   }
 
   onUp(e) {
+    if (this.measuring) {
+      this.measuring = false;
+      this.measureAt = Date.now();
+      e.preventDefault();
+      e.stopPropagation();
+      const m = this.measure;
+      if (m && Math.abs(m.p2.p - m.p1.p) < 1e-9 && m.p2.t === m.p1.t) {
+        this.measure = null;      // 几乎没拖动，不算测量
+      }
+      this.schedule();
+      return;
+    }
     if (this.drag) {
       this.drag = null;
       e.preventDefault();
@@ -284,6 +332,12 @@ class DrawLayer {
   /** 光标模式下点一下：命中已有图元就选中，方便 Delete 删除 */
   onClick(e) {
     if (this.tool) return;
+    if (Date.now() - this.measureAt < 300) return;   // 刚量完那一下不算点击
+    if (this.measure) {
+      this.measure = null;
+      this.schedule();
+      return;
+    }
     const rect = this.host.getBoundingClientRect();
     const hit = this.hitTest(e.clientX - rect.left, e.clientY - rect.top);
     if (hit !== this.sel) {
@@ -355,7 +409,7 @@ class DrawLayer {
     const g = this.g;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
-    if (!this.items.length && !this.draft) return;
+    if (!this.items.length && !this.draft && !this.measure) return;
 
     const accent = cv('--accent') || '#2563eb';
     const text = cv('--text-2') || '#49525d';
@@ -365,6 +419,72 @@ class DrawLayer {
       this.paint(this.items[i], i === this.sel, { w, h, accent, text, panel });
     }
     if (this.draft) this.paint(this.draft, false, { w, h, accent, text, panel });
+    if (this.measure) this.paintMeasure({ w, h, text, panel });
+  }
+
+  /** Shift 测量框：矩形 + 涨跌幅 / 价格差 / 根数 / 时间跨度 */
+  paintMeasure(S) {
+    const m = this.measure;
+    if (!m) return;
+    const x1 = this.xOf(m.p1.t);
+    const y1 = this.yOf(m.p1.p);
+    const x2 = this.xOf(m.p2.t);
+    const y2 = this.yOf(m.p2.p);
+    if (x1 == null || y1 == null || x2 == null || y2 == null) return;
+
+    const g = this.g;
+    const up = m.p2.p >= m.p1.p;
+    const color = up ? (cv('--up') || '#0f9d63') : (cv('--down') || '#e5484d');
+    const l = Math.min(x1, x2);
+    const t = Math.min(y1, y2);
+    const w = Math.abs(x2 - x1);
+    const h = Math.abs(y2 - y1);
+
+    g.save();
+    g.globalAlpha = 0.12;
+    g.fillStyle = color;
+    g.fillRect(l, t, w, h);
+    g.globalAlpha = 1;
+    g.strokeStyle = color;
+    g.lineWidth = 1;
+    g.setLineDash([3, 3]);
+    g.strokeRect(l + 0.5, t + 0.5, w, h);
+    g.setLineDash([]);
+
+    const dp = dpOf(this.cell.symbol);
+    const pct = m.p1.p ? (m.p2.p / m.p1.p - 1) * 100 : 0;
+    const diff = m.p2.p - m.p1.p;
+    const step = IV_SEC[this.cell.interval] || 60;
+    const bars = Math.max(1, Math.round(Math.abs(m.p2.t - m.p1.t) / step));
+    const span = fmtSpan(Math.abs(m.p2.t - m.p1.t));
+    const line1 = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%   ${diff >= 0 ? '+' : ''}${fmtPrice(diff, dp)}`;
+    const line2 = `${bars} 根 · ${span}`;
+
+    g.font = '11px ui-monospace, Consolas, monospace';
+    const bw = Math.max(g.measureText(line1).width, g.measureText(line2).width) + 16;
+    const bh = 34;
+    let bx = l + w / 2 - bw / 2;
+    let by = t - bh - 8;
+    if (by < 4) by = Math.min(t + h + 8, this.host.clientHeight - bh - 4);
+    bx = Math.max(4, Math.min(this.host.clientWidth - bw - 74, bx));
+
+    g.globalAlpha = 0.95;
+    g.fillStyle = S.panel;
+    g.beginPath();
+    if (g.roundRect) g.roundRect(bx, by, bw, bh, 4); else g.rect(bx, by, bw, bh);
+    g.fill();
+    g.globalAlpha = 1;
+    g.strokeStyle = color;
+    g.lineWidth = 1;
+    g.stroke();
+
+    g.textBaseline = 'top';
+    g.fillStyle = color;
+    g.fillText(line1, bx + 8, by + 5);
+    g.font = '10px ui-monospace, Consolas, monospace';
+    g.fillStyle = S.text || '#49525d';
+    g.fillText(line2, bx + 8, by + 20);
+    g.restore();
   }
 
   paint(it, sel, S) {
@@ -525,6 +645,7 @@ export class BigChart {
   bindBar() {
     this.root.querySelector('#bc-back').addEventListener('click', () => this.close());
     this.root.querySelector('#bc-close').addEventListener('click', () => this.close());
+    this.root.querySelector('#bc-reset').addEventListener('click', () => this.resetView());
     this.root.querySelector('#bc-oi-btn').addEventListener('click', () => this.setOI(!this.oiOn));
     this.root.querySelector('#bc-detail-btn').addEventListener('click', () => {
       this.setDetail(!this.showDetail);
@@ -567,6 +688,21 @@ export class BigChart {
       }
       this.setTool(t);
     });
+  }
+
+  /** 图形复位：回到「K 线铺满 + 最后一根贴右」 */
+  resetView() {
+    const btn = this.root.querySelector('#bc-reset');
+    if (btn) {
+      btn.classList.remove('off');
+      btn.classList.add('spin');
+      setTimeout(() => btn.classList.remove('spin'), 460);
+    }
+    const c = this.cell;
+    if (!c) return;
+    c.autoFit = true;
+    if (c.times.length) c.fitRange();
+    if (this.draw) this.draw.schedule();
   }
 
   /* ---------------- 持仓量叠加 ---------------- */
@@ -788,6 +924,8 @@ export class BigChart {
 
     cell.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
       if (this.draw) this.draw.schedule();
+      const rb = this.root.querySelector('#bc-reset');
+      if (rb) rb.classList.toggle('off', !cell.autoFit);
       // 首次加载 / 换周期 / 缩放后都补一次明细行（没在悬停时跟最后一根走）
       if (this.hoverIdx < 0 && this.cell && this.cell.times.length) {
         this.showInfo(this.cell.times.length - 1);
@@ -929,6 +1067,7 @@ export class BigChart {
       return false;
     }
     if (e.key === 'v' || e.key === 'V') { this.setTool('cursor'); return true; }
+    if (e.key === 'r' || e.key === 'R') { this.resetView(); return true; }
     if (e.key === 'ArrowLeft') { e.preventDefault(); this.step(-1); return true; }
     if (e.key === 'ArrowRight') { e.preventDefault(); this.step(1); return true; }
     return false;
