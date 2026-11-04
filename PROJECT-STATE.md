@@ -419,6 +419,30 @@ binance-terminal/
 **已经排除的**：主线程不卡。静置 20 秒只有 1 个 60ms 长任务，切视图约 50ms，
 长墙滚动 16ms/帧。所以「不流畅」只可能是等网络，不是渲染。
 
+### 详情侧栏为什么慢，怎么修的（2026-11-05 00:40）
+
+截图现象：点开一个合约，合约数据全 `--`、盘口「等待盘口数据…」、迷你走势空白。
+
+**根因**：`setSymbol()` 一口气发 5 个走代理的请求
+（klines / perp / fundinghist / lsrh / depth+trades），互相抢带宽。
+而其中**三个根本不需要请求**——资金费率、标记价、基差，行情表 `/api/market` 里本来就有。
+
+**四处改动**：
+
+| 改动 | 效果 |
+|---|---|
+| `build()` 用 `market` 里的 `fr`/`mp`/`ip` 预填费率/标记价/基差 | **2~4 秒 → 6~16ms** |
+| `loadSnapshot` 拆开：depth 和 trades 各自 `.then()` 渲染（原来 `Promise.all`，盘口被成交拖住） | 盘口早 0.7 秒 |
+| `loadPerp`/`loadFundHist`/`loadLSRH` 延后 400/800/1100ms 再发，别跟盘口抢 | 盘口 2.1s → 1.4s |
+| `/api/perp` 的 oi/lsr 总超时 8s → 4s，单请求 25s → 12s；加 `PERP_CACHE` 10 秒 + `_inflight` 去重 | 最坏情况不再卡 8 秒 |
+
+`DepthWorker._sync_subs` 的对账间隔也从 1 秒缩到 0.3 秒（切币后盘口早 0.7 秒）。
+
+**踩的坑**：`renderPerp()` 里无条件 `set('fr', ...)`，当 `/api/perp` 拿不到值时会把预填的
+费率又刷成 `--`。改成「有值才覆盖」。
+
+**实测（BZUSDT@f，冷门合约）**：费率/标记价 16ms、盘口 1.4s、成交/持仓量/走势 3.0s。
+
 ### 图形复位 + Shift 测量（2026-11-04 晚）
 
 **复位按钮**：大图右上角（`.bc-reset`，`position:absolute; right:72px`），

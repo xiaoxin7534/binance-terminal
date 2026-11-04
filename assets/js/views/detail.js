@@ -34,6 +34,7 @@ export class DetailPanel {
     this.trades = [];
     this.lastDepth = null;
     this.bookOpen = false;     // 盘口默认 8 档（4 卖 + 4 买），展开后 20 档
+    this.pendTimers = [];      // 延后发出的请求（切币时要取消）
     this.renderEmpty();
   }
 
@@ -88,6 +89,8 @@ export class DetailPanel {
     this.trades = [];
     this.lastDepth = null;
     this.perp = null;
+    this.pendTimers.forEach(clearTimeout);
+    this.pendTimers = [];
     clearInterval(this.cdTimer);
     clearInterval(this.perpTimer);
     clearInterval(this.bookTimer);
@@ -95,9 +98,11 @@ export class DetailPanel {
     this.loadSpark();
     this.loadSnapshot(sym);
     if (sym.endsWith('@f')) {
-      this.loadPerp(sym);
-      this.loadFundHist(sym);
-      this.loadLSRH(sym);
+      // 盘口和成交先出（用户最常看），合约数据延后 400ms，
+      // 免得 5 个请求同时打代理，反而全都慢
+      this.pendTimers.push(setTimeout(() => this.loadPerp(sym), 400));
+      this.pendTimers.push(setTimeout(() => this.loadFundHist(sym), 800));
+      this.pendTimers.push(setTimeout(() => this.loadLSRH(sym), 1100));
       this.cdTimer = setInterval(() => this.tickCountdown(), 1000);
       this.perpTimer = setInterval(() => {
         if (!this.visible()) return;
@@ -149,16 +154,22 @@ export class DetailPanel {
   }
 
   /** 用 REST 快照先把盘口/成交填上，WS 订阅生效后再接管 */
-  async loadSnapshot(sym) {
-    try {
-      const [d, t] = await Promise.all([api.depth(sym, 20), api.trades(sym, 20)]);
+  loadSnapshot(sym) {
+    // 两个请求**分开渲染**：原来用 Promise.all，盘口要等成交一起回来才显示，
+    // 而成交往往比盘口慢一倍，用户盯着「等待盘口数据…」干等
+    api.depth(sym, 20).then((d) => {
       if (sym !== this.symbol) return;
       this.lastDepth = { s: sym, b: d.b || [], a: d.a || [] };
+      this.lastDepthAt = Date.now();
       this.renderBook();
+    }).catch(() => { /* 网络抖动忽略 */ });
+
+    api.trades(sym, 20).then((t) => {
+      if (sym !== this.symbol) return;
       const rows = (t.t || []).slice().reverse();
       this.trades = rows.map(([p, q, T, m]) => ({ s: sym, p, q, m, T }));
       this.renderTrades();
-    } catch (e) { /* 网络抖动忽略 */ }
+    }).catch(() => { /* 网络抖动忽略 */ });
   }
 
   build() {
@@ -177,6 +188,15 @@ export class DetailPanel {
     const fav = isFav(this.symbol);
     const sec = (market.get(this.symbol) || {}).sec || [];
     const tags = sec.map((k) => `<span>${sectorLabels[k] || k}</span>`).join('');
+    // 资金费率 / 标记价 / 基差这三项行情表里本来就有，先用它填上，
+    // 用户不用等 /api/perp 那趟代理往返（2~4 秒）才看到数字
+    let basisTxt = '--';
+    let basisCls = '';
+    if (row.mp && row.ip) {
+      const b = (row.mp / row.ip - 1) * 100;
+      basisTxt = (b > 0 ? '+' : '') + b.toFixed(3) + '%';
+      basisCls = Math.abs(b) < 0.005 ? 'flat' : dirClass(b);
+    }
     this.root.innerHTML = `
       <div class="dt-head">
         <div class="dt-title">
@@ -226,12 +246,12 @@ export class DetailPanel {
       <div class="dt-section" data-role="perp">
         <h4>合约数据<span class="cd" data-role="cd"></span><span class="line"></span></h4>
         <div class="kv-grid">
-          <div class="kv"><span>资金费率</span><b data-role="fr">--</b></div>
-          <div class="kv"><span>下次结算</span><b data-role="nft">--</b></div>
+          <div class="kv"><span>资金费率</span><b data-role="fr" class="${row.fr == null ? '' : dirClass(row.fr)}">${row.fr == null ? '--' : fmtFunding(row.fr)}</b></div>
+          <div class="kv"><span>下次结算</span><b data-role="nft">${row.nft ? p2(new Date(row.nft).getMonth() + 1) + '/' + p2(new Date(row.nft).getDate()) + ' ' + p2(new Date(row.nft).getHours()) + ':' + p2(new Date(row.nft).getMinutes()) : '--'}</b></div>
           <div class="kv"><span>持仓量</span><b data-role="oi">--</b></div>
           <div class="kv"><span>持仓价值</span><b data-role="oiv">--</b></div>
-          <div class="kv"><span>标记价</span><b data-role="mp">--</b></div>
-          <div class="kv"><span>基差</span><b data-role="basis">--</b></div>
+          <div class="kv"><span>标记价</span><b data-role="mp">${row.mp ? fmtPrice(row.mp, dp) : '--'}</b></div>
+          <div class="kv"><span>基差</span><b data-role="basis" class="${basisCls}">${basisTxt}</b></div>
         </div>
         <div class="lsr" data-role="lsr" hidden>
           <div class="lsr-bar"><i data-role="lsr-bar"></i></div>
@@ -468,14 +488,16 @@ export class DetailPanel {
     };
     const dp = dpOf(this.symbol);
     const row = market.get(this.symbol) || {};
-    set('fr', fmtFunding(d.fr), d.fr == null ? '' : dirClass(d.fr));
+    // 只覆盖有值的项：/api/perp 拿不到时（代理抖），别把 build() 里
+    // 用行情表预填好的费率/标记价/基差又清成 --
+    if (d.fr != null) set('fr', fmtFunding(d.fr), dirClass(d.fr));
 
     if (d.oi != null) {
       set('oi', fmtQty(d.oi));
       const px = d.mp || row.l || 0;
       set('oiv', px ? fmtCompact(d.oi * px) : '--');
     }
-    set('mp', d.mp ? fmtPrice(d.mp, dp) : '--');
+    if (d.mp) set('mp', fmtPrice(d.mp, dp));
     if (d.mp && d.ip) {
       const basis = (d.mp / d.ip - 1) * 100;
       set('basis', (basis > 0 ? '+' : '') + basis.toFixed(3) + '%',

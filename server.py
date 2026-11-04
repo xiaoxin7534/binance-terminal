@@ -1084,7 +1084,8 @@ class DepthWorker(threading.Thread):
         last_sync = 0.0
         while True:
             now = time.time()
-            if now - last_sync > 1.0:
+            # 对账快一点：用户切币后盘口能早 0.7 秒出来
+            if now - last_sync > 0.3:
                 self._sync_subs()
                 last_sync = now
             if now - last_ping > 150:
@@ -1285,6 +1286,8 @@ _seen_lock = threading.Lock()
 # 同一个 key 同时只允许一个请求在飞：预取和用户请求撞上时，后来的等前一个
 _inflight = {}
 _inflight_lock = threading.Lock()
+PERP_CACHE = {}              # 合约详情结果缓存（10 秒），去重时给等待方直接用
+_perp_cache_lock = threading.Lock()
 
 
 def _fetch_klines(perp, sym, iv, limit, start=None, end=None):
@@ -1883,6 +1886,31 @@ class Handler(BaseHTTPRequestHandler):
     def api_perp(self, qs):
         sym = (qs.get("symbol") or ["BTCUSDT"])[0]
         sym = (sym[:-2] if sym.endswith("@f") else sym).upper()
+        # 列表详情 + 大图盘口栏可能同时问同一个币，别让它们各打一次币安
+        now = time.time()
+        with _perp_cache_lock:
+            hit = PERP_CACHE.get(sym)
+            if hit and hit[0] > now:
+                return self._json(hit[1])
+
+        ck = "perp:" + sym
+        with _inflight_lock:
+            ev = _inflight.get(ck)
+            owner = ev is None
+            if owner:
+                ev = threading.Event()
+                _inflight[ck] = ev
+        if not owner:
+            ev.wait(6)
+            with _perp_cache_lock:
+                hit = PERP_CACHE.get(sym)
+                if hit:
+                    return self._json(hit[1])
+            with _inflight_lock:
+                if ck not in _inflight:
+                    _inflight[ck] = threading.Event()
+                    ev = _inflight[ck]
+                    owner = True
         base, quote = split_symbol(sym)
         f = funding_of(sym) or {}
         fr = f.get("fr")
@@ -1897,7 +1925,7 @@ class Handler(BaseHTTPRequestHandler):
 
         def grab(name, path, ttl):
             try:
-                res[name] = json.loads(cached_fapi(path, ttl, 25))
+                res[name] = json.loads(cached_fapi(path, ttl, 12))
             except Exception:       # noqa: BLE001
                 res[name] = None
 
@@ -1909,9 +1937,18 @@ class Handler(BaseHTTPRequestHandler):
         ]
         for t in jobs:
             t.start()
-        deadline = time.time() + 8
+        # 持仓量/多空比是可选数据，拿不到就空着，别让整个面板等 8 秒
+        deadline = time.time() + 4
         for t in jobs:
             t.join(max(0.1, deadline - time.time()))
+        with _perp_cache_lock:
+            if len(PERP_CACHE) > 300:
+                PERP_CACHE.clear()
+            PERP_CACHE[sym] = (time.time() + 10, out)
+        if owner:
+            with _inflight_lock:
+                _inflight.pop(ck, None)
+            ev.set()
 
         oi = res.get("oi")
         if isinstance(oi, dict):
