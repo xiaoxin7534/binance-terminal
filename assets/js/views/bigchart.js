@@ -7,6 +7,7 @@
  *   3. 绘图图层（canvas 叠在图表上，坐标靠 timeToCoordinate / priceToCoordinate 换算）
  */
 
+import { api } from '../core/api.js';
 import { state, market, dpOf } from '../core/store.js';
 import { fmtPrice, fmtPct, fmtCompact, dirClass, symLabel } from '../core/fmt.js';
 import { Cell } from './grid.js';
@@ -498,6 +499,9 @@ export class BigChart {
     this.boundChart = null;
     this.hoverIdx = -1;
     this.showDetail = false;
+    this.oiOn = false;
+    this.oiSeries = null;
+    this.oiData = null;
 
     this.body = root.querySelector('.bc-body');
     this.detailPanel = new DetailPanel(root.querySelector('#bc-detail'), { delay: 0 });
@@ -521,6 +525,7 @@ export class BigChart {
   bindBar() {
     this.root.querySelector('#bc-back').addEventListener('click', () => this.close());
     this.root.querySelector('#bc-close').addEventListener('click', () => this.close());
+    this.root.querySelector('#bc-oi-btn').addEventListener('click', () => this.setOI(!this.oiOn));
     this.root.querySelector('#bc-detail-btn').addEventListener('click', () => {
       this.setDetail(!this.showDetail);
       if (this.ctx.onDetailToggle) this.ctx.onDetailToggle(this.showDetail);
@@ -564,6 +569,76 @@ export class BigChart {
     });
   }
 
+  /* ---------------- 持仓量叠加 ---------------- */
+  setOI(on) {
+    this.oiOn = !!on;
+    const btn = this.root.querySelector('#bc-oi-btn');
+    if (btn) btn.classList.toggle('on', this.oiOn);
+    this.applyOI();
+  }
+
+  /** 建/拆 OI 曲线。放在独立的 pane 2，不跟价格轴和成交量抢空间 */
+  applyOI() {
+    const cell = this.cell;
+    if (!cell || !cell.chart) return;
+    const chart = cell.chart;
+    if (this.oiSeries) {
+      try { chart.removeSeries(this.oiSeries); } catch (e) { /* ignore */ }
+      this.oiSeries = null;
+    }
+    if (!this.oiOn || !this.symbol || !this.symbol.endsWith('@f')) {
+      if (this.oiOn && this.symbol && !this.symbol.endsWith('@f')) {
+        // 现货没有持仓量，点了也白点，直接回弹
+        this.oiOn = false;
+        const b = this.root.querySelector('#bc-oi-btn');
+        if (b) b.classList.remove('on');
+      }
+      return;
+    }
+    const LC = window.LightweightCharts;
+    try {
+      this.oiSeries = chart.addSeries(LC.LineSeries, {
+        color: '#8b5cf6',
+        lineWidth: 1.4,
+        priceLineVisible: false,
+        lastValueVisible: true,
+        priceFormat: { type: 'volume' },
+      }, 2);
+    } catch (e) {
+      this.oiSeries = null;
+      return;
+    }
+    this.sizeOIPane();
+    this.loadOI();
+  }
+
+  sizeOIPane() {
+    const cell = this.cell;
+    if (!cell || !cell.chart) return;
+    clearTimeout(this.oiTimer);
+    this.oiTimer = setTimeout(() => {
+      if (!cell.chart || !this.oiSeries) return;
+      try {
+        const panes = cell.chart.panes();
+        if (panes[2] && panes[2].setHeight) panes[2].setHeight(88);
+      } catch (e) { /* ignore */ }
+    }, 260);
+  }
+
+  async loadOI() {
+    const sym = this.symbol;
+    if (!sym || !sym.endsWith('@f') || !this.oiSeries) return;
+    const period = ['time', '1m', '5m'].includes(this.interval) ? '5m' : this.interval;
+    try {
+      const d = await api.oihist(sym, period, 500);
+      if (sym !== this.symbol || !this.oiSeries) return;
+      const rows = (d.h || []).map(([t, oi]) => ({ time: Math.floor(t / 1000), value: oi }));
+      this.oiData = rows;
+      this.oiSeries.setData(rows);
+      this.sizeOIPane();
+    } catch (e) { /* 网络抖动忽略 */ }
+  }
+
   /** 右侧盘口栏（复用列表页那块 DetailPanel） */
   setDetail(on) {
     this.showDetail = !!on;
@@ -597,6 +672,7 @@ export class BigChart {
     if (!this.cell) return;
     this.cell.setInterval(iv);
     this.bindChart();
+    if (this.oiOn) this.applyOI();
     if (this.draw) this.draw.setKey(this.drawKey());
     this.hoverIdx = -1;
     this.showInfo(this.cell.times.length - 1);
@@ -629,6 +705,7 @@ export class BigChart {
     this.mountCell();
     this.syncBar();
     if (this.showDetail) this.detailPanel.setSymbol(this.symbol);
+    if (this.oiOn) this.applyOI();
   }
 
   close() {

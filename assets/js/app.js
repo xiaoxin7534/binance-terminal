@@ -12,6 +12,8 @@ import { ListView } from './views/list.js';
 import { DetailPanel } from './views/detail.js';
 import { WatchView } from './views/watch.js';
 import { BigChart } from './views/bigchart.js';
+import { Scanner } from './views/scanner.js';
+import { Alerts } from './core/alerts.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -44,6 +46,8 @@ let detail = null;
 let gridDetail = null;
 let watch = null;
 let big = null;
+let scanner = null;
+let alerts = null;
 let stream = null;
 
 /* ------------------------------------------------------------------ 主题 */
@@ -441,6 +445,16 @@ function bindToolbar() {
     applyTheme(state.theme === 'dark' ? 'light' : 'dark');
   });
 
+  $('#btn-scanner').addEventListener('click', () => {
+    if (scanner.isOpen()) scanner.close();
+    else scanner.open();
+  });
+
+  $('#btn-alerts').addEventListener('click', () => {
+    if (alerts.isOpen()) alerts.close();
+    else alerts.open();
+  });
+
   $('#help-close').addEventListener('click', () => toggleHelp(false));
   $('#help').addEventListener('click', (e) => {
     if (e.target.id === 'help') toggleHelp(false);
@@ -508,6 +522,14 @@ async function boot() {
       if (grid) grid.setIndicators();
     },
   });
+  alerts = new Alerts($('#alerts'), {
+    save,
+    toast: (m) => toast(m),
+    onPick: (sym) => openBig(sym, state.interval),
+  });
+  scanner = new Scanner($('#scanner'), {
+    onPick: (sym) => openBig(sym, state.interval),
+  });
   watch = new WatchView($('#watch'), {
     onPick: pickSymbol,
     onPickGrid: pickToGrid,
@@ -556,7 +578,7 @@ async function boot() {
     onMessage: (msg) => {
       switch (msg.t) {
         case 'tk': applyTicks(msg.d); break;
-        case 'fund': applyFunding(msg.d); break;
+        case 'fund': applyFunding(msg.d); if (alerts) alerts.check(); break;
         case 'k': grid.onKline(msg); if (big) big.onKline(msg); break;
         case 'd': detail.onDepth(msg); gridDetail.onDepth(msg); if (big) big.onDepth(msg); break;
         case 'r': detail.onTrade(msg); gridDetail.onTrade(msg); if (big) big.onTrade(msg); break;
@@ -600,7 +622,7 @@ async function boot() {
     if (big && big.isOpen()) big.onFrame(ALL);
   });
 
-  window.__term = { grid, list, detail, gridDetail, big, state, market };
+  window.__term = { grid, list, detail, gridDetail, big, scanner, alerts, state, market };
 
   setTimeout(() => {
     const sp = $('#splash');
@@ -631,7 +653,9 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') e.target.blur();
     return;
   }
-  if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
+  if (e.key === '?' ) { e.preventDefault(); toggleHelp(); return; }
+  if (e.key === 'Escape' && scanner && scanner.isOpen()) { scanner.close(); return; }
+  if (e.key === 'Escape' && alerts && alerts.isOpen()) { alerts.close(); return; }
   if (e.key === 'Escape' && !$('#help').classList.contains('hidden')) { toggleHelp(false); return; }
   // 大图模式下先交给它自己处理，其余全局快捷键一律让路
   if (big && big.isOpen()) {

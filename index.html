@@ -137,6 +137,9 @@
 
         <div class="tb-spacer"></div>
 
+        <button class="chip" id="btn-scanner" title="全市场永续：资金费率 / 基差 排行">扫描器</button>
+        <button class="chip" id="btn-alerts" title="资金费率突破阈值时提醒">告警</button>
+
         <label class="switch" title="所有图表的可视区间与十字光标保持同步">
           <input type="checkbox" id="sync-range" checked>
           <span class="track"></span>
@@ -246,6 +249,7 @@
 
     <div class="tb-spacer"></div>
 
+    <button class="chip bc-oi-btn" id="bc-oi-btn" title="叠加持仓量曲线（仅永续）">持仓量</button>
     <button class="chip bc-detail-btn" id="bc-detail-btn" title="显示 / 隐藏盘口与合约数据">盘口</button>
 
     <div class="bc-draw" id="bc-draw">
@@ -281,6 +285,61 @@
   <div class="bc-info" id="bc-info"></div>
   <div class="bc-body dt-off" id="bc-body">
     <aside class="detail bc-detail" id="bc-detail"></aside>
+  </div>
+</div>
+
+<!-- ======================= 告警 ======================= -->
+<div class="alerts hidden" id="alerts">
+  <div class="al-box">
+    <div class="al-head">
+      <h3>资金费率告警</h3>
+      <label class="switch">
+        <input type="checkbox" id="al-on">
+        <span class="track"></span>
+        <span>开启</span>
+      </label>
+      <span class="al-label">绝对值 ≥</span>
+      <input class="al-input" id="al-thr" type="number" step="0.01" min="0.001" max="5">
+      <span class="al-label">%</span>
+      <div class="tb-spacer"></div>
+      <span class="muted al-hint">常规费率约 0.01%，8 小时结算一次</span>
+      <button class="icon-btn" id="al-close" title="关闭 (Esc)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="al-list" id="al-list"></div>
+  </div>
+</div>
+
+<!-- ======================= 永续扫描器 ======================= -->
+<div class="scanner hidden" id="scanner">
+  <div class="sc-box">
+    <div class="sc-head">
+      <h3>永续扫描器</h3>
+      <input class="search sc-search" id="sc-search" placeholder="过滤币种，如 BTC">
+      <div class="seg" id="sc-minqv">
+        <button data-q="0" class="on">全部</button>
+        <button data-q="1000000">额&gt;100万</button>
+        <button data-q="10000000">额&gt;1000万</button>
+      </div>
+      <div class="seg" id="sc-sort">
+        <button data-s="annual" class="on">年化费率 ↓</button>
+        <button data-s="basis">基差</button>
+        <button data-s="qv">成交额</button>
+        <button data-s="chgp">涨跌幅</button>
+      </div>
+      <span class="muted" id="sc-count"></span>
+      <button class="icon-btn" id="sc-close" title="关闭 (Esc)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="sc-table">
+      <div class="sc-thead">
+        <span>合约</span><span>资金费率</span><span>年化</span><span>距结算</span>
+        <span>基差</span><span>标记价</span><span>24h 涨跌</span><span>成交额</span>
+      </div>
+      <div class="sc-body" id="sc-body"></div>
+    </div>
   </div>
 </div>
 

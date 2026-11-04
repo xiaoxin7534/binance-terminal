@@ -1617,3 +1617,175 @@ kbd {
   color: var(--muted);
   line-height: 1.6;
 }
+
+/* 板块 chip 上的平均涨跌幅 */
+.sector-chip .sec-chg {
+  margin-left: 4px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  opacity: .92;
+}
+.sector-chip .sec-chg.up { color: var(--up); }
+.sector-chip .sec-chg.down { color: var(--down); }
+.sector-chip .sec-chg.flat { color: var(--muted); }
+
+/* ==========================================================================
+   永续扫描器
+   ========================================================================== */
+.scanner {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 14, 20, .34);
+  backdrop-filter: blur(2px);
+}
+.sc-box {
+  width: min(1080px, calc(100vw - 40px));
+  height: min(760px, calc(100vh - 70px));
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+.sc-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.sc-head h3 { margin: 0; font-size: 14px; font-weight: 700; white-space: nowrap; }
+.sc-search { width: 170px; height: 26px; }
+.sc-table { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sc-thead,
+.sc-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr .9fr 1fr 1.1fr .9fr 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 0 14px;
+}
+.sc-thead {
+  height: 30px;
+  flex: 0 0 30px;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: .4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.sc-thead span:not(:first-child) { text-align: right; }
+.sc-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.sc-row {
+  height: 28px;
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .1s;
+}
+.sc-row:hover { background: var(--hover); }
+.sc-sym { font-weight: 600; display: flex; align-items: center; gap: 5px; }
+.sc-sym i {
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--panel-3);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.sc-num { font-family: var(--mono); text-align: right; font-size: 11px; }
+.sc-num.muted { color: var(--muted); }
+.sc-empty { padding: 40px; text-align: center; color: var(--muted); }
+
+/* 详情面板：多空比历史曲线 */
+.lsrh { margin-top: 10px; }
+.lsrh-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 9.5px;
+  color: var(--muted);
+  letter-spacing: .3px;
+  margin-bottom: 3px;
+}
+.lsrh-svg {
+  width: 100%;
+  height: 30px;
+  color: var(--up);
+  opacity: .85;
+  display: block;
+}
+
+/* ==========================================================================
+   资金费率告警
+   ========================================================================== */
+.alerts {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 14, 20, .3);
+  backdrop-filter: blur(2px);
+}
+.al-box {
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(560px, calc(100vh - 80px));
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+.al-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.al-head h3 { margin: 0; font-size: 14px; font-weight: 700; white-space: nowrap; }
+.al-label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.al-input {
+  width: 68px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid var(--border-2);
+  background: var(--panel-3);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.al-hint { font-size: 10px; white-space: nowrap; }
+.al-list { flex: 1; min-height: 120px; overflow-y: auto; scrollbar-width: thin; }
+.al-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 60px;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 11.5px;
+}
+.al-row:hover { background: var(--hover); }
+.al-sym { font-weight: 600; display: flex; align-items: center; gap: 5px; }
+.al-sym i {
+  font-style: normal; font-size: 9px; font-weight: 500;
+  color: var(--muted); background: var(--panel-3);
+  padding: 0 4px; border-radius: 3px;
+}
+.al-fr { font-family: var(--mono); text-align: right; }
+.al-t { font-family: var(--mono); font-size: 10.5px; color: var(--muted); text-align: right; }
+.al-empty { padding: 40px 20px; text-align: center; color: var(--muted); font-size: 11.5px; }

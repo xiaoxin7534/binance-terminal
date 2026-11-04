@@ -1376,6 +1376,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.api_depth(parse_qs(u.query))
             if u.path == "/api/trades":
                 return self.api_trades(parse_qs(u.query))
+            if u.path == "/api/oihist":
+                return self.api_oihist(parse_qs(u.query))
+            if u.path == "/api/lsrh":
+                return self.api_lsrh(parse_qs(u.query))
             if u.path == "/api/perp":
                 return self.api_perp(parse_qs(u.query))
             if u.path == "/api/intraday":
@@ -1453,6 +1457,11 @@ class Handler(BaseHTTPRequestHandler):
                 if f:
                     row["fr"] = round(f["fr"] * 100, 6)   # 百分比，便于直接显示
                     row["nft"] = f["nft"]
+                    # 标记价 / 指数价：扫描器算基差用，免得每个合约再单拉一次 /api/perp
+                    if f.get("mp"):
+                        row["mp"] = f["mp"]
+                    if f.get("ip"):
+                        row["ip"] = f["ip"]
             rows.append(row)
         rows.sort(key=lambda r: -r["qv"])
         self._json({"ts": int(time.time() * 1000), "rows": rows,
@@ -1466,6 +1475,30 @@ class Handler(BaseHTTPRequestHandler):
         limit = min(int((qs.get("limit") or ["400"])[0]), 1000)
         out = get_klines(perp, sym, iv, limit)
         self._json({"symbol": sym, "interval": iv, "k": out})
+
+    def api_oihist(self, qs):
+        """持仓量历史：/futures/data/openInterestHist（和 /fapi 一样走 www 域名）"""
+        sym = (qs.get("symbol") or ["BTCUSDT"])[0].replace("@f", "").upper()
+        period = (qs.get("period") or ["5m"])[0]
+        if period not in ("5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"):
+            period = "5m"
+        limit = min(int((qs.get("limit") or ["500"])[0]), 500)
+        raw = json.loads(cached_fapi(
+            "/futures/data/openInterestHist?symbol=%s&period=%s&limit=%d" % (sym, period, limit), 30, 30))
+        self._json({"h": [[int(x["timestamp"]), float(x["sumOpenInterest"]),
+                           float(x["sumOpenInterestValue"])] for x in raw]})
+
+    def api_lsrh(self, qs):
+        """多空账户比历史"""
+        sym = (qs.get("symbol") or ["BTCUSDT"])[0].replace("@f", "").upper()
+        period = (qs.get("period") or ["5m"])[0]
+        if period not in ("5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"):
+            period = "5m"
+        limit = min(int((qs.get("limit") or ["60"])[0]), 500)
+        raw = json.loads(cached_fapi(
+            "/futures/data/globalLongShortAccountRatio?symbol=%s&period=%s&limit=%d" % (sym, period, limit), 30, 30))
+        self._json({"h": [[int(x["timestamp"]), float(x["longShortRatio"]),
+                           float(x["longAccount"]) * 100] for x in raw]})
 
     def api_depth(self, qs):
         sym = (qs.get("symbol") or ["BTCUSDT"])[0]

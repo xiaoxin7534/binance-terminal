@@ -32,6 +32,7 @@ const DEFAULTS = {
   colOrder: null,
   search: '',
   sort: { key: 'qv', dir: -1 },
+  alert: { on: false, thr: 0.05 },   // 资金费率告警：绝对值 ≥ thr% 时提醒
 };
 
 function load() {
@@ -71,6 +72,7 @@ export function save() {
         detailOpen: state.detailOpen,
         selected: state.selected, mkt: state.mkt, tab: state.tab, sector: state.sector,
         gridSector: state.gridSector, colOrder: state.colOrder, sort: state.sort,
+        alert: state.alert,
       }));
     } catch (e) { /* 隐私模式下忽略 */ }
   }, 250);

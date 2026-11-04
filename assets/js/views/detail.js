@@ -97,6 +97,7 @@ export class DetailPanel {
     if (sym.endsWith('@f')) {
       this.loadPerp(sym);
       this.loadFundHist(sym);
+      this.loadLSRH(sym);
       this.cdTimer = setInterval(() => this.tickCountdown(), 1000);
       this.perpTimer = setInterval(() => {
         if (!this.visible()) return;
@@ -240,6 +241,7 @@ export class DetailPanel {
             <span>多空比 <b data-role="lsrv">--</b></span>
           </div>
         </div>
+        <div class="lsrh" data-role="lsrh" hidden></div>
         <div class="fh-head"><span>资金费率历史</span><span>近 9 次结算</span></div>
         <div class="fhist" data-role="fhist"></div>
       </div>` : ''}
@@ -519,6 +521,42 @@ export class DetailPanel {
       if (sym !== this.symbol) return;
       this.renderFundHist(d.h || []);
     } catch (e) { /* 网络抖动忽略 */ }
+  }
+
+  async loadLSRH(sym) {
+    if (!sym || !sym.endsWith('@f')) return;
+    try {
+      const d = await api.lsrh(sym, '5m', 48);
+      if (sym !== this.symbol) return;
+      this.renderLSRH(d.h || []);
+    } catch (e) { /* 网络抖动忽略 */ }
+  }
+
+  /** 多空账户比的历史走势：48 个 5 分钟点 = 近 4 小时 */
+  renderLSRH(raw) {
+    const el = this.$ && this.$('lsrh');
+    if (!el) return;
+    if (!raw.length) {
+      el.hidden = true;
+      return;
+    }
+    const vals = raw.map((x) => x[2]);
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const span = Math.max(0.8, max - min);
+    const W = 100;
+    const H = 26;
+    const pts = vals.map((v, i) => {
+      const x = (i / Math.max(1, vals.length - 1)) * W;
+      const y = H - ((v - min) / span) * (H - 5) - 2.5;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const last = vals[vals.length - 1];
+    el.hidden = false;
+    el.innerHTML = `<div class="lsrh-head"><span>多空比走势</span><span>近 4 小时 · 多头 ${last.toFixed(1)}%</span></div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="lsrh-svg">
+        <polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.3" vector-effect="non-scaling-stroke"/>
+      </svg>`;
   }
 
   renderFundHist(raw) {

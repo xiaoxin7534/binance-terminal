@@ -179,28 +179,56 @@ export class ListView {
   }
 
   /* ---------------- 分类栏 ---------------- */
-  buildSectorBar() {
-    if (!this.sectorBar) return;
+  /** 各板块的成分数 + 平均涨跌幅（同一币种只算一次） */
+  sectorStats() {
     const counts = {};
+    const sum = {};
     const seen = new Set();
+    let total = 0;
     for (const r of market.values()) {
       if (!matchMkt(r, state.mkt)) continue;
       const k = r.b + '|' + (r.mkt || 'spot');
       if (seen.has(k)) continue;
       seen.add(k);
-      for (const t of (r.sec || [])) counts[t] = (counts[t] || 0) + 1;
+      total++;
+      for (const t of (r.sec || [])) {
+        counts[t] = (counts[t] || 0) + 1;
+        sum[t] = (sum[t] || 0) + (r.chgp || 0);
+      }
     }
+    const avg = {};
+    for (const k in counts) avg[k] = sum[k] / counts[k];
+    return { counts, avg, total };
+  }
+
+  buildSectorBar() {
+    if (!this.sectorBar) return;
+    const st = this.sectorStats();
+    this.sectorBar._stats = st;
     const parts = [
-      `<button class="sector-chip${!state.sector ? ' on' : ''}" data-sec="">全部板块<span class="n">${seen.size}</span></button>`,
+      `<button class="sector-chip${!state.sector ? ' on' : ''}" data-sec="">全部板块<span class="n">${st.total}</span></button>`,
       '<span class="divider"></span>',
     ];
     for (const k of SECTOR_ORDER) {
       const label = sectorLabels[k];
-      const n = counts[k] || 0;
+      const n = st.counts[k] || 0;
       if (!label || !n) continue;
-      parts.push(`<button class="sector-chip${state.sector === k ? ' on' : ''}" data-sec="${k}">${label}<span class="n">${n}</span></button>`);
+      const a = st.avg[k] || 0;
+      parts.push(`<button class="sector-chip${state.sector === k ? ' on' : ''}" data-sec="${k}">${label}`
+        + `<span class="n">${n}</span><span class="sec-chg ${dirClass(a)}" data-sec-chg="${k}">${fmtPct(a)}</span></button>`);
     }
     this.sectorBar.innerHTML = parts.join('');
+  }
+
+  /** 板块 chip 上的平均涨跌幅随行情刷新（只改文本，不重建 DOM） */
+  updateSectorChg() {
+    if (!this.sectorBar || !this.sectorBar.firstChild) return;
+    const st = this.sectorStats();
+    this.sectorBar.querySelectorAll('[data-sec-chg]').forEach((el) => {
+      const a = st.avg[el.dataset.secChg] || 0;
+      el.textContent = fmtPct(a);
+      el.className = 'sec-chg ' + dirClass(a);
+    });
   }
 
   /* ---------------- 事件 ---------------- */
@@ -427,6 +455,7 @@ export class ListView {
       this.renderWindow(true);
     }
     this.updateCount();
+    this.updateSectorChg();
   }
 
   updateCount() {

@@ -16,6 +16,10 @@ export const api = {
     json(`/api/trades?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),
   perp: (symbol) => json(`/api/perp?symbol=${encodeURIComponent(symbol)}`),
   intraday: (symbol) => json(`/api/intraday?symbol=${encodeURIComponent(symbol)}`),
+  oihist: (symbol, period = '5m', limit = 500) =>
+    json(`/api/oihist?symbol=${encodeURIComponent(symbol)}&period=${period}&limit=${limit}`),
+  lsrh: (symbol, period = '5m', limit = 60) =>
+    json(`/api/lsrh?symbol=${encodeURIComponent(symbol)}&period=${period}&limit=${limit}`),
   fundingHist: (symbol) =>
     json(`/api/fundinghist?symbol=${encodeURIComponent(symbol)}`),
   status: () => json('/api/status'),
