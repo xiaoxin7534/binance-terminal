@@ -267,18 +267,19 @@ export class GridView {
   }
 
   /* ---------------- 联动 ---------------- */
+  /** 按「时间范围」联动：各格子 K 线根数不同，用逻辑索引会对不上 */
   syncRange(src, range) {
-    if (!src.ready || !range) return;
+    if (!src.ready || !range || range.from == null || range.to == null) return;
     if (this.syncLock) return;
     this.syncLock = 1;
     for (const c of this.cells) {
       if (c === src || !c.chart || !c.ready) continue;
       if (!!c.intraday !== !!src.intraday) continue;
       try {
-        const cur = c.chart.timeScale().getVisibleLogicalRange();
-        // 已经一致就不必再设，避免互相触发形成回环
-        if (cur && Math.abs(cur.from - range.from) < 0.4 && Math.abs(cur.to - range.to) < 0.4) continue;
-        c.chart.timeScale().setVisibleLogicalRange(range);
+        const cur = c.chart.timeScale().getVisibleRange();
+        // 已经一致就不必再设，避免互相触发形成回环（时间会被吸附到 K 线，留 1 秒容差）
+        if (cur && Math.abs(cur.from - range.from) < 1 && Math.abs(cur.to - range.to) < 1) continue;
+        c.chart.timeScale().setVisibleRange(range);
       } catch (e) { /* ignore */ }
     }
     this.syncLock = 0;

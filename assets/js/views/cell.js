@@ -465,7 +465,9 @@ export class Cell {
       if (state.sync) this.view.syncCrosshair(this, param.time);
     });
 
-    this.chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    // 用「时间范围」而不是「逻辑索引范围」联动：
+    // 各格子的 K 线根数不同，同一个 logical range 对应的实际时间段并不一样
+    this.chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
       if (this.disposed) return;
       if (range && state.sync) this.view.syncRange(this, range);
     });
@@ -729,7 +731,6 @@ export class Cell {
       return;
     }
     // 目标：K 线铺满整个格子，且最后一根贴住右侧
-    // 先按容器宽度算出「铺满需要多大间距」，再滚到最右；间距过小说明放不下，就只显示最近的一段
     const n = this.bars.length;
     if (!n) return;
     const apply = (tries) => {
@@ -740,9 +741,12 @@ export class Cell {
         return;                       // 容器还没布局好，等下一帧
       }
       const paneW = Math.max(80, w - 62);        // 右侧价格轴约占 60px
-      // 2.6px 是蜡烛还能看出形状的下限，低于它就只显示最近的一段；
-      // 上限 14px 防止品种太少时蜡烛胖成方块
-      const spacing = Math.max(2.6, Math.min(14, paneW / (n + 2)));
+      // ★ 必须用固定的目标根数算间距，不能用 this.bars.length。
+      // 每个币的 K 线根数不一样（新币、停更的币更少），按各自的 n 算出来的
+      // barSpacing 就不同 → 时间轴比例不同 → 多个格子横向错位。
+      // 数据不足的格子会左边留白，但至少和别的格子对得齐。
+      const target = BAR_LIMIT;
+      const spacing = Math.max(2.6, Math.min(14, paneW / (target + 2)));
       try {
         this.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 1 });
         this.chart.timeScale().scrollToRealTime();

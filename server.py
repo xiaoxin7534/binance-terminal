@@ -17,6 +17,7 @@
 
 import argparse
 import base64
+import concurrent.futures
 import gzip
 import json
 import os
@@ -199,6 +200,8 @@ def fapi_get(path, timeout=25):
 _cache = {}
 _cache_lock = threading.Lock()
 LAST_USER_REQ = 0.0          # 最后一次浏览器请求的时间，预取靠它判断「用户现在忙不忙」
+_INTRADAY = {}               # 分时结果缓存（当天数据基本不变，只有最后一根在动）
+_intraday_lock = threading.Lock()
 _opener_env = urllib.request.build_opener()
 _opener_direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -1629,34 +1632,57 @@ class Handler(BaseHTTPRequestHandler):
         self._json(out)
 
     def api_intraday(self, qs):
-        """分时：本地当天 00:00 起的 1 分钟收盘价，附带今日开盘价作为基准线"""
+        """分时：本地当天 00:00 起的 1 分钟收盘价，附带今日开盘价作为基准线
+
+        一天 1440 根，接口单次上限 1000，必须分两段。**两段并行拉**——
+        原来串行是 2×RTT，合约走代理时就是 5 秒起步，分时图慢的根因就在这里。
+        """
         sym = (qs.get("symbol") or ["BTCUSDT"])[0]
         perp = sym.endswith("@f")
         sym = (sym[:-2] if perp else sym).upper()
         lt = time.localtime()
         midnight = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)) * 1000)
-        out = []
-        start = midnight
-        for _ in range(3):          # 一天 1440 根，接口单次上限 1000，最多分 2 段
+        day = time.strftime("%Y%m%d", lt)
+
+        ck = ("f:" if perp else "s:") + sym + "|" + day
+        now = time.time()
+        with _intraday_lock:
+            hit = _INTRADAY.get(ck)
+            if hit and hit[0] > now:
+                return self._json(hit[1])
+
+        # 1 分钟一根，前 1000 根覆盖 00:00~16:39，第二段直接从 16:40 起，
+        # 不用等第一段回来就能发出去
+        starts = [midnight, midnight + 1000 * 60000]
+
+        def fetch(st):
             if perp:
-                raw = json.loads(cached_fapi(
-                    "/fapi/v1/klines?symbol=%s&interval=1m&startTime=%d&limit=1000" % (sym, start), 20, 30))
-            else:
-                raw = json.loads(cached_get(
-                    "/api/v3/klines?symbol=%s&interval=1m&startTime=%d&limit=1000" % (sym, start), 20))
-            if not raw:
-                break
-            out.extend(raw)
-            if len(raw) < 1000:
-                break
-            start = int(raw[-1][0]) + 60000
+                return json.loads(cached_fapi(
+                    "/fapi/v1/klines?symbol=%s&interval=1m&startTime=%d&limit=1000" % (sym, st), 20, 30))
+            return json.loads(cached_get(
+                "/api/v3/klines?symbol=%s&interval=1m&startTime=%d&limit=1000" % (sym, st), 20))
+
+        out = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            for f in [ex.submit(fetch, st) for st in starts]:
+                try:
+                    out.extend(f.result() or [])
+                except Exception:       # noqa: BLE001
+                    pass
+        out.sort(key=lambda r: r[0])
+
         if not out:
             return self._json({"symbol": sym, "o": None, "k": []})
-        self._json({
+        payload = {
             "symbol": sym,
             "o": float(out[0][1]),      # 今日开盘价 = 分时基准线
             "k": [[int(r[0]), float(r[4]), float(r[5])] for r in out],
-        })
+        }
+        with _intraday_lock:
+            if len(_INTRADAY) > 200:
+                _INTRADAY.clear()
+            _INTRADAY[ck] = (now + 12.0, payload)
+        self._json(payload)
 
     def api_fundinghist(self, qs):
         sym = (qs.get("symbol") or ["BTCUSDT"])[0]
