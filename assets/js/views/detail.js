@@ -41,6 +41,9 @@ export class DetailPanel {
     this.root.innerHTML = '<div class="dt-empty">选择左侧任意币种<br>查看盘口与明细</div>';
     this.chart = null;
     this.$ = null;
+    this.symbol = null;      // 不清掉的话，下次 setSymbol 同一个币会 early-return
+    this.lastDepth = null;
+    this.lastDepthAt = 0;
   }
 
   /** 所在视图被隐藏时停止轮询（列表页和图表墙各有一块详情） */

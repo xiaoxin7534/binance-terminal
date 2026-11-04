@@ -246,6 +246,8 @@
 
     <div class="tb-spacer"></div>
 
+    <button class="chip bc-detail-btn" id="bc-detail-btn" title="显示 / 隐藏盘口与合约数据">盘口</button>
+
     <div class="bc-draw" id="bc-draw">
       <button data-tool="cursor" class="on" title="光标：点选图元后按 Delete 删除">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3l14 8-6 1.6L10.4 19z"/></svg>
@@ -277,7 +279,9 @@
   </div>
 
   <div class="bc-info" id="bc-info"></div>
-  <div class="bc-body" id="bc-body"></div>
+  <div class="bc-body dt-off" id="bc-body">
+    <aside class="detail bc-detail" id="bc-detail"></aside>
+  </div>
 </div>
 
 <!-- ======================= 快捷键 ======================= -->

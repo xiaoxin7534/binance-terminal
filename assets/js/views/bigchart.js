@@ -10,6 +10,7 @@
 import { state, market, dpOf } from '../core/store.js';
 import { fmtPrice, fmtPct, fmtCompact, dirClass, symLabel } from '../core/fmt.js';
 import { Cell } from './grid.js';
+import { DetailPanel } from './detail.js';
 
 const DRAW_KEY = 'binance-terminal.drawings.v1';
 const IVS = ['time', '1m', '5m', '15m', '1h', '4h', '1d'];
@@ -496,8 +497,10 @@ export class BigChart {
     this.draw = null;
     this.boundChart = null;
     this.hoverIdx = -1;
+    this.showDetail = false;
 
     this.body = root.querySelector('.bc-body');
+    this.detailPanel = new DetailPanel(root.querySelector('#bc-detail'), { delay: 0 });
     this.infoEl = root.querySelector('#bc-info');
     this.pxEl = root.querySelector('#bc-px');
     this.chgEl = root.querySelector('#bc-chg');
@@ -518,6 +521,10 @@ export class BigChart {
   bindBar() {
     this.root.querySelector('#bc-back').addEventListener('click', () => this.close());
     this.root.querySelector('#bc-close').addEventListener('click', () => this.close());
+    this.root.querySelector('#bc-detail-btn').addEventListener('click', () => {
+      this.setDetail(!this.showDetail);
+      if (this.ctx.onDetailToggle) this.ctx.onDetailToggle(this.showDetail);
+    });
 
     this.ivBar.addEventListener('click', (e) => {
       const b = e.target.closest('button[data-iv]');
@@ -555,6 +562,16 @@ export class BigChart {
       }
       this.setTool(t);
     });
+  }
+
+  /** 右侧盘口栏（复用列表页那块 DetailPanel） */
+  setDetail(on) {
+    this.showDetail = !!on;
+    this.body.classList.toggle('dt-off', !this.showDetail);
+    const btn = this.root.querySelector('#bc-detail-btn');
+    if (btn) btn.classList.toggle('on', this.showDetail);
+    if (this.showDetail) this.detailPanel.setSymbol(this.symbol);
+    else this.detailPanel.renderEmpty();
   }
 
   syncIndicators() {
@@ -611,6 +628,7 @@ export class BigChart {
     }
     this.mountCell();
     this.syncBar();
+    if (this.showDetail) this.detailPanel.setSymbol(this.symbol);
   }
 
   close() {
@@ -618,6 +636,7 @@ export class BigChart {
     this.root.classList.add('hidden');
     document.body.classList.remove('bc-open');
     this.destroyCell();
+    this.detailPanel.renderEmpty();
     if (this.ctx.onClose) this.ctx.onClose();
   }
 
@@ -651,7 +670,7 @@ export class BigChart {
     };
     const cell = new Cell(stub, 0);
     cell.interval = this.interval;
-    this.body.appendChild(cell.el);
+    this.body.insertBefore(cell.el, this.detailPanel.root);
     cell.setSymbol(this.symbol);
     cell.mount();
     cell.syncTools();
@@ -789,6 +808,14 @@ export class BigChart {
     if (dirty.has(this.symbol)) this.syncQuote();
   }
 
+  onDepth(msg) {
+    if (this.showDetail) this.detailPanel.onDepth(msg);
+  }
+
+  onTrade(msg) {
+    if (this.showDetail) this.detailPanel.onTrade(msg);
+  }
+
   applyTheme() {
     if (this.cell) this.cell.applyTheme();
     if (this.draw) this.draw.schedule();
@@ -803,6 +830,7 @@ export class BigChart {
     const next = list[(i + dir + list.length) % list.length];
     if (!next || next === this.symbol) return;
     this.open(next, this.interval);
+    if (this.showDetail) this.detailPanel.setSymbol(next);
     if (this.ctx.onSymbolChange) this.ctx.onSymbolChange(next);
   }
 

@@ -240,8 +240,10 @@ function syncSubs() {
     if (big && big.isOpen() && big.symbol) {
       klines.push([big.symbol, big.interval === 'time' ? '1m' : big.interval]);
     }
-    // 盘口/逐笔只有详情面板在看着才需要，面板收起或大图盖住时别占着深度流
-    const wantBook = !(big && big.isOpen()) && (state.view === 'list' || !!state.detailOpen);
+    // 盘口/逐笔只有详情面板在看着才需要
+    const wantBook = (big && big.isOpen())
+      ? !!big.showDetail
+      : (state.view === 'list' || !!state.detailOpen);
     api.sub({
       tickers: [...tickers],
       klines,
@@ -493,6 +495,7 @@ async function boot() {
     symbolList: () => (state.view === 'list' && list && list.symbols
       ? list.symbols()
       : grid.filteredSymbols(state.mkt, state.tab, state.sector)),
+    onDetailToggle: () => syncSubs(),
     onSymbolChange: (sym) => {
       state.selected = sym;
       save();
@@ -555,8 +558,8 @@ async function boot() {
         case 'tk': applyTicks(msg.d); break;
         case 'fund': applyFunding(msg.d); break;
         case 'k': grid.onKline(msg); if (big) big.onKline(msg); break;
-        case 'd': detail.onDepth(msg); gridDetail.onDepth(msg); break;
-        case 'r': detail.onTrade(msg); gridDetail.onTrade(msg); break;
+        case 'd': detail.onDepth(msg); gridDetail.onDepth(msg); if (big) big.onDepth(msg); break;
+        case 'r': detail.onTrade(msg); gridDetail.onTrade(msg); if (big) big.onTrade(msg); break;
         case 'ws':
           setConn(msg.up);
           // 行情流重连后补一次 K 线，避免断线期间漏掉整根

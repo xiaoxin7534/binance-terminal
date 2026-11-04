@@ -1510,8 +1510,19 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 .bc-info b { font-family: var(--mono); font-weight: 500; color: var(--text-2); }
 .bc-info .bi-time { color: var(--text-2); font-family: var(--mono); }
 
-.bc-body { flex: 1; min-height: 0; position: relative; }
-.bc-body > .cell { position: absolute; inset: 0; }
+.bc-body { flex: 1; min-height: 0; display: flex; }
+.bc-body > .cell { position: relative; flex: 1; min-width: 0; }
+.bc-body.dt-off > .bc-detail { display: none; }
+.bc-detail {
+  width: 320px;
+  flex: 0 0 320px;
+  border-left: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+@media (max-width: 1180px) {
+  .bc-detail { width: 286px; flex-basis: 286px; }
+}
+.bc-detail-btn.on { color: var(--accent); background: var(--accent-soft); border-color: rgba(37, 99, 235, .22); }
 /* 大图的币种/周期/指标都在顶部工具栏里，格子自带的表头和悬浮周期条不用了 */
 .bc-body .cell-head,
 .bc-body .cell-tools { display: none; }

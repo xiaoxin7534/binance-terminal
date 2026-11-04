@@ -420,6 +420,32 @@ test('快捷键面板：? 打开，Esc 关闭', async (s) => {
   assert(r.bigStillOpen, 'Esc 关面板时把大图也关了');
 });
 
+test('大图：右侧盘口栏可开关', async (s) => {
+  const r = await s.ev(`
+    const big = window.__term.big;
+    if (big.isOpen()) big.close();
+    await new Promise(r=>setTimeout(r,300));
+    big.open('BTCUSDT@f','1m');
+    await new Promise(r=>setTimeout(r,3500));
+    document.querySelector('#bc-detail-btn').click();
+    await new Promise(r=>setTimeout(r,5000));
+    const p = document.querySelector('#bc-detail');
+    const on = { visible: p.getClientRects().length > 0, rows: p.querySelectorAll('.book-row').length,
+                 title: (p.querySelector('.dt-title h3')||{}).textContent,
+                 chartW: Math.round(document.querySelector('#bigchart .cell').getBoundingClientRect().width) };
+    document.querySelector('#bc-detail-btn').click();
+    await new Promise(r=>setTimeout(r,600));
+    const off = { visible: p.getClientRects().length > 0,
+                  chartW: Math.round(document.querySelector('#bigchart .cell').getBoundingClientRect().width) };
+    return { on, off };
+  `);
+  assert(r.on.visible, '盘口栏没显示');
+  assert(r.on.rows > 0, '盘口没数据');
+  assert(r.off.visible === false, '盘口栏没关掉');
+  assert(r.off.chartW > r.on.chartW, '关掉盘口栏后图表没变宽');
+  await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,400)); return 1;`);
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();
