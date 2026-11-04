@@ -19,6 +19,7 @@ import argparse
 import base64
 import concurrent.futures
 import gzip
+import http.client
 import json
 import os
 import queue
@@ -206,7 +207,88 @@ _opener_env = urllib.request.build_opener()
 _opener_direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+# --------------------------------------------------------------------------
+# HTTPS 连接池
+#
+# 实测到 data-api.binance.vision 的 TLS 握手要 2 秒（TCP 只要 2ms），
+# 每个 K 线请求都重新握手一次，8 个格子就是 8 次。复用连接能把这 2 秒省掉。
+# 池子里失败就退回原来的 urllib 逻辑，不影响可用性。
+# --------------------------------------------------------------------------
+
+_https_pool = {}                 # host -> [(conn, 最后使用时间), ...]
+_https_pool_lock = threading.Lock()
+HTTPS_IDLE_MAX = 25.0            # 空闲超过这么久就丢掉，币安那边可能已经关了
+HTTPS_POOL_MAX = 8
+
+
+def _https_take(host):
+    now = time.time()
+    with _https_pool_lock:
+        lst = _https_pool.get(host)
+        while lst:
+            conn, used = lst.pop()
+            if conn.sock is not None and now - used < HTTPS_IDLE_MAX:
+                return conn
+            try:
+                conn.close()
+            except Exception:       # noqa: BLE001
+                pass
+    return None
+
+
+def _https_give(host, conn):
+    with _https_pool_lock:
+        lst = _https_pool.setdefault(host, [])
+        if len(lst) < HTTPS_POOL_MAX:
+            lst.append((conn, time.time()))
+            return
+    try:
+        conn.close()
+    except Exception:           # noqa: BLE001
+        pass
+
+
+def _http_get_pooled(host, path, timeout):
+    for attempt in (0, 1):
+        conn = _https_take(host)
+        fresh = conn is None
+        if fresh:
+            conn = http.client.HTTPSConnection(
+                host, timeout=timeout, context=ssl.create_default_context())
+        try:
+            conn.request("GET", path, headers={
+                "User-Agent": UA,
+                "Accept": "application/json",
+                "Accept-Encoding": "gzip, deflate",
+            })
+            r = conn.getresponse()
+            body = r.read()
+            enc = (r.getheader("Content-Encoding") or "").lower()
+            if "gzip" in enc:
+                body = gzip.decompress(body)
+            elif "deflate" in enc:
+                body = zlib.decompress(body, -zlib.MAX_WBITS)
+            if r.status != 200:
+                raise ConnectionError("HTTP %d" % r.status)
+            _https_give(host, conn)
+            return body
+        except Exception:           # noqa: BLE001
+            try:
+                conn.close()
+            except Exception:       # noqa: BLE001
+                pass
+            # 复用的旧连接可能已被服务端关掉，重开一条再试一次
+            if attempt == 1 or fresh:
+                if attempt == 1:
+                    raise
+    raise ConnectionError("http_get failed")
+
+
 def http_get(path, timeout=25):
+    try:
+        return _http_get_pooled(REST_HOST, path, timeout)
+    except Exception:               # noqa: BLE001
+        pass                        # 连接池出问题就退回 urllib，别把功能搞挂
     url = "https://%s%s" % (REST_HOST, path)
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,

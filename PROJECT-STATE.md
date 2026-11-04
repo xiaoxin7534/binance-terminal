@@ -1,7 +1,7 @@
 # 项目交接文档 · 币安本地看盘终端
 
 > 这份文档写给"下一个接手的人（或 AI）"，读完应该能立刻上手改代码。
-> 最后更新：2026-11-04 23:25
+> 最后更新：2026-11-04 23:35
 
 ---
 
@@ -377,6 +377,23 @@ binance-terminal/
 所以先按语义拆成 `--ask/--bid/--ok/--danger`，再翻 `--up/--down`。
 `grid.js` 的 `themeColors()` 和 `detail.js` 的 `colorSpark()` 里的硬编码 rgba 也一并改成 `cv('--up-vol')` 这类读取。
 
+### 多格 K 线对齐 BUG（2026-11-04 23:10 修）
+
+**现象**：多个格子加载进度不一样时，K 线横向错开，同一时间点对不齐。
+
+**根因**：`fitRange()` 里 `spacing = paneW / (bars.length + 2)`——
+每个币的 K 线根数不同（新币、停更的币更少），算出来的 `barSpacing` 就不同，
+时间轴比例不同，自然错位。
+
+**修法两处**：
+1. `fitRange()` 的间距改成按**固定目标根数**（`BAR_LIMIT`）算，不依赖本格子的数据量。
+   数据不足的格子左边留白，但和别的格子对得齐。
+2. 联动从 `subscribeVisibleLogicalRangeChange` + `setVisibleLogicalRange`
+   改成 `subscribeVisibleTimeRangeChange` + `setVisibleRange`——
+   逻辑索引在不同数据长度的格子之间没有可比性，时间才有。
+
+**验证**：8 个格子 `getVisibleRange().from` 的极差为 **0 秒**。
+
 ### 性能：首屏为什么曾经慢，现在怎么改的（2026-11-04 晚）
 
 **实测时间线（改之前）**：DOMContentLoaded 121ms，但 `/api/market` 要 **1145ms**，
@@ -401,6 +418,23 @@ binance-terminal/
 
 **已经排除的**：主线程不卡。静置 20 秒只有 1 个 60ms 长任务，切视图约 50ms，
 长墙滚动 16ms/帧。所以「不流畅」只可能是等网络，不是渲染。
+
+### 真正的元凶：TLS 握手 2 秒（2026-11-04 23:30 补）
+
+上一轮只优化到「请求排队」，用户反馈还是慢。继续拆解单次请求：
+
+```
+现货直连 data-api.binance.vision:  TCP 2ms → TLS 1.98s → 首字节 3.42s
+合约代理 www.binance.com:          TCP 2ms → TLS 2.44s → 首字节 3.08s
+```
+
+**TCP 只要 2ms，TLS 握手吃掉 2 秒。** 每个 K 线请求都重新握手一次，8 个格子就是 8 次。
+
+修法：`http_get()` 改成走 **HTTPS 连接池**（`http.client.HTTPSConnection` 复用），
+失败自动退回原来的 urllib 逻辑。实测连续 6 个不同币：**2~3s → 0.5~1.2s**。
+
+同时分时接口原来是**串行拉两段**（一天 1440 根，单次上限 1000），
+改成两段并行 + 结果缓存 12 秒：现货 2.4s → 1.2s，合约 5.4s → 3.8s。
 
 **踩过的坑**：预取一开始用 3 线程硬跑，把代理带宽吃满，导致详情面板的
 `/api/depth` 5 秒都回不来（E2E 的「盘口栏」用例直接挂了）。加让路逻辑后正常。
