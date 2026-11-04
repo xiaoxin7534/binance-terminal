@@ -239,10 +239,10 @@ function syncSubs() {
     // 只订阅挂载中的格子：墙铺 100+ 个格子时不能给每个都开 K 线流
     const klines = grid.cells
       .filter((c) => c.symbol && c.mounted)
-      .map((c) => [c.symbol, c.interval === 'time' ? '1m' : c.interval]);
+      .map((c) => [c.symbol, c.interval === 'time' ? '1m' : c.interval === '5d' ? '5m' : c.interval]);
     // 大图模式在看的那一个也要订阅，否则最后一根不动
     if (big && big.isOpen() && big.symbol) {
-      klines.push([big.symbol, big.interval === 'time' ? '1m' : big.interval]);
+      klines.push([big.symbol, big.interval === 'time' ? '1m' : big.interval === '5d' ? '5m' : big.interval]);
     }
     // 盘口/逐笔只有详情面板在看着才需要
     const wantBook = (big && big.isOpen())

@@ -538,6 +538,29 @@ test('K 线：拖到左边缘自动补更早的历史', async (s) => {
   assert(r.wentBack, '加载回来的数据不比原来的更早');
 });
 
+test('5 日连续分时', async (s) => {
+  const r = await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,600));
+    const c = window.__term.grid.cells[0];
+    c.setInterval('5d');
+    for (let i = 0; i < 200; i++) {
+      if (c.times.length > 100) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    const vr = c.chart ? c.chart.timeScale().getVisibleRange() : null;
+    const spanDays = vr ? Math.round((vr.to - vr.from) / 86400) : 0;
+    return { bars: c.times.length, intraday: c.intraday, spanDays,
+             legend: (c.legendEl || {}).textContent || '',
+             has5dBtn: [...document.querySelectorAll('#interval-seg button')].some(b => b.dataset.iv === '5d') };
+  `);
+  assert(r.has5dBtn, '周期条里没有 5日 按钮');
+  assert(r.intraday, '5日 没走分时渲染路径');
+  assert(r.bars > 500, '5 日数据太少：' + r.bars);
+  assert(r.spanDays >= 4, '可视范围不到 4 天：' + r.spanDays);
+  assert(r.legend.includes('首日开'), '图例没显示首日开盘价：' + r.legend);
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();

@@ -2005,6 +2005,53 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         self._json(out)
 
+    def _intraday_multi(self, sym, perp, days, midnight):
+        """多日连续分时：用 5 分钟粒度，5 天 = 1440 根，两段并行拉完。
+
+        1 分钟粒度 5 天要 7200 根、8 次请求，而且小格子里本来就显示不下，
+        5 分钟足够看清日内形态。
+        """
+        step = 300000
+        start = midnight - (days - 1) * 86400000
+        ck = ("f:" if perp else "s:") + sym + "|%dd" % days
+        now = time.time()
+        with _intraday_lock:
+            hit = _INTRADAY.get(ck)
+            if hit and hit[0] > now:
+                return self._json(hit[1])
+
+        def fetch(st):
+            path = "/fapi/v1/klines" if perp else "/api/v3/klines"
+            q = "%s?symbol=%s&interval=5m&startTime=%d&limit=1000" % (path, sym, st)
+            return json.loads(cached_fapi(q, 20, 30) if perp else cached_get(q, 20))
+
+        starts = [start + i * 1000 * step for i in range(0, 2)]
+        out = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            for f in [ex.submit(fetch, st) for st in starts]:
+                try:
+                    out.extend(f.result() or [])
+                except Exception:       # noqa: BLE001
+                    pass
+        out.sort(key=lambda r: r[0])
+        # 只留 start 之后、今天之内的
+        out = [r for r in out if r[0] >= start]
+
+        if not out:
+            return self._json({"symbol": sym, "o": None, "k": [], "days": days})
+        payload = {
+            "symbol": sym,
+            "o": float(out[0][1]),      # 基准线 = 首日开盘价
+            "days": days,
+            "step": 300,
+            "k": [[int(r[0]), float(r[4]), float(r[5])] for r in out],
+        }
+        with _intraday_lock:
+            if len(_INTRADAY) > 200:
+                _INTRADAY.clear()
+            _INTRADAY[ck] = (now + 20.0, payload)
+        return self._json(payload)
+
     def api_intraday(self, qs):
         """分时：本地当天 00:00 起的 1 分钟收盘价，附带今日开盘价作为基准线
 
@@ -2017,6 +2064,9 @@ class Handler(BaseHTTPRequestHandler):
         lt = time.localtime()
         midnight = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)) * 1000)
         day = time.strftime("%Y%m%d", lt)
+        days = max(1, min(10, int((qs.get("days") or ["1"])[0])))
+        if days > 1:
+            return self._intraday_multi(sym, perp, days, midnight)
 
         ck = ("f:" if perp else "s:") + sym + "|" + day
         now = time.time()

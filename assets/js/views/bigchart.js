@@ -14,8 +14,8 @@ import { Cell } from './cell.js';
 import { DetailPanel } from './detail.js';
 
 const DRAW_KEY = 'binance-terminal.drawings.v1';
-const IVS = ['time', '1m', '5m', '15m', '1h', '4h', '1d'];
-const wsIv = (iv) => (iv === 'time' ? '1m' : iv);
+const IVS = ['time', '5d', '1m', '5m', '15m', '1h', '4h', '1d'];
+const wsIv = (iv) => (iv === 'time' ? '1m' : iv === '5d' ? '5m' : iv);
 const pad2 = (n) => String(n).padStart(2, '0');
 
 const TOOLS = ['cursor', 'trend', 'hline', 'rect', 'fib'];

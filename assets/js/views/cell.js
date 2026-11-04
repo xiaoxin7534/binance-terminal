@@ -11,12 +11,14 @@ import { sma, ema, boll, macd, macdLast, lastSma, lastEma, lastBoll } from '../c
 import { openPicker } from '../core/picker.js';
 
 const LC = window.LightweightCharts;
-const IVS = ['time', '1m', '5m', '15m', '1h', '4h', '1d'];
+const IVS = ['time', '5d', '1m', '5m', '15m', '1h', '4h', '1d'];
+/** 走「折线分时」路径的周期：当日分时 + 5 日连续分时 */
+const isIntradayIv = (iv) => iv === 'time' || iv === '5d';
 const IV_LABEL = {
   time: '分时', '1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d',
 };
 /** 分时用 1 分钟数据算，但订阅要落回 1m 流 */
-export const wsInterval = (iv) => (iv === 'time' ? '1m' : iv);
+export const wsInterval = (iv) => (iv === 'time' ? '1m' : iv === '5d' ? '5m' : iv);
 const MA_DEFS = [
   { p: 5, cls: 'lg-ma5', color: '#e8a33d', type: 'sma' },
   { p: 52, cls: 'lg-ma52', color: '#3b82f6', type: 'sma' },
@@ -226,7 +228,7 @@ export class Cell {
   /* ---------------- 图表生命周期 ---------------- */
   buildChart() {
     this.disposed = false;
-    this.intraday = this.interval === 'time';
+    this.intraday = isIntradayIv(this.interval);
     const C = themeColors();
     const dp = dpOf(this.symbol);
     const ind = state.indicators;
@@ -279,12 +281,14 @@ export class Cell {
     });
 
     if (this.intraday) {
-      // 分时横轴只显示时分，不要出现 11/04 这种日期刻度
       const p2 = (n) => String(n).padStart(2, '0');
+      const five = this.interval === '5d';
       this.chart.applyOptions({
         timeScale: {
           tickMarkFormatter: (time) => {
             const d = new Date(time * 1000);
+            // 5 日分时横轴要能看出是哪一天，当日分时只显示时分
+            if (five) return p2(d.getMonth() + 1) + '/' + p2(d.getDate());
             return p2(d.getHours()) + ':' + p2(d.getMinutes());
           },
         },
@@ -543,14 +547,14 @@ export class Cell {
 
   setInterval(iv) {
     if (this.interval === iv) return;
-    const wasIntraday = this.interval === 'time';
+    const wasIntraday = isIntradayIv(this.interval);
     this.interval = iv;
     this.autoFit = true;
     this.noMore = false;
     this.loadingMore = false;
     this.syncTools();
     // 分时和 K 线是两种图（折线 vs 蜡烛），切换时必须重建
-    if (this.mounted && wasIntraday !== (iv === 'time')) {
+    if (this.mounted && wasIntraday !== isIntradayIv(iv)) {
       this.unmountChart();
       this.mount();
     } else if (this.mounted) {
@@ -634,7 +638,7 @@ export class Cell {
     }
     try {
       const res = this.intraday
-        ? await api.intraday(this.symbol)
+        ? await api.intraday(this.symbol, this.interval === '5d' ? 5 : 1)
         : await api.klines(this.symbol, this.interval, BAR_LIMIT);
       if (id !== this.reqId) return;
       this.errEl.classList.add('hidden');
@@ -729,7 +733,9 @@ export class Cell {
     const STEPS = [1, 2, 3, 5, 6, 10, 12, 15, 20, 30, 60];
     const w = this.host.clientWidth || 320;
     const paneW = Math.max(80, w - 62);
-    const want = 1440 / Math.max(60, paneW / 1.6);
+    // 当日分时固定 1440 根；5 日分时是 5×288 根，但今天还没走完，按实际根数算
+    const total = this.interval === '5d' ? (this.times.length || 1440) : 1440;
+    const want = total / Math.max(60, paneW / 1.6);
     for (const st of STEPS) if (st >= want) return st;
     return 60;
   }
@@ -740,7 +746,8 @@ export class Cell {
       const w = this.host.clientWidth || 0;
       if (w < 20) return;
       const paneW = Math.max(80, w - 62);
-      const slots = Math.ceil(1440 / this.intradayStep()) + 1;   // 抽样后的"一天有多少个槽"
+      const total = this.interval === '5d' ? (this.times.length || 1440) : 1440;
+      const slots = Math.ceil(total / this.intradayStep()) + 1;   // 抽样后有多少个槽
       const spacing = Math.max(0.05, paneW / slots);
       try {
         this.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 0 });
@@ -987,7 +994,7 @@ export class Cell {
       if (px == null) { this.legendEl.innerHTML = ''; return; }
       const pct = base ? ((px - base) / base) * 100 : 0;
       this.legendEl.innerHTML =
-        `<span>今开 <b>${fmtPrice(base, dp)}</b></span>` +
+        `<span>${this.interval === '5d' ? '首日开' : '今开'} <b>${fmtPrice(base, dp)}</b></span>` +
         `<span class="${dirClass(pct)}">${fmtPct(pct)}</span>`;
       if (this.mlegendEl) this.mlegendEl.innerHTML = '';
       return;
