@@ -10,7 +10,7 @@
 import { api } from '../core/api.js';
 import { state, market, dpOf } from '../core/store.js';
 import { fmtPrice, fmtPct, fmtCompact, dirClass, symLabel } from '../core/fmt.js';
-import { Cell } from './grid.js';
+import { Cell } from './cell.js';
 import { DetailPanel } from './detail.js';
 
 const DRAW_KEY = 'binance-terminal.drawings.v1';

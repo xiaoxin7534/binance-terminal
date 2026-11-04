@@ -446,6 +446,74 @@ test('大图：右侧盘口栏可开关', async (s) => {
   await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,400)); return 1;`);
 });
 
+test('扫描器：打开 / 过滤 / 关闭', async (s) => {
+  const r = await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,600));
+    document.querySelector('#btn-scanner').click();
+    await new Promise(r=>setTimeout(r,900));
+    const n1 = document.querySelectorAll('.sc-row').length;
+    document.querySelector('#sc-minqv button[data-q="10000000"]').click();
+    await new Promise(r=>setTimeout(r,500));
+    const n2 = document.querySelectorAll('.sc-row').length;
+    const first = (document.querySelector('.sc-row')||{}).textContent || '';
+    document.querySelector('#sc-close').click();
+    await new Promise(r=>setTimeout(r,300));
+    return { n1, n2, first: first.replace(/\s+/g,' ').trim(), closed: !window.__term.scanner.isOpen() };
+  `);
+  assert(r.n1 > 10, '扫描器没渲染出行：' + r.n1);
+  assert(r.n2 > 0 && r.n2 <= r.n1, '成交额过滤没生效');
+  assert(r.closed, '扫描器没关掉');
+});
+
+test('告警：阈值命中后进列表', async (s) => {
+  const r = await s.ev(`
+    const a = window.__term.alerts;
+    if (!window.__term.state.alert.on) {
+      document.querySelector('#btn-alerts').click();
+      await new Promise(r=>setTimeout(r,400));
+      document.querySelector('#al-on').click();
+      await new Promise(r=>setTimeout(r,400));
+    } else {
+      document.querySelector('#btn-alerts').click();
+      await new Promise(r=>setTimeout(r,300));
+    }
+    const victim = [...a.baseline][0];
+    a.baseline.delete(victim);
+    a.check();
+    await new Promise(r=>setTimeout(r,500));
+    const rows = document.querySelectorAll('.al-row').length;
+    document.querySelector('#al-close').click();
+    return { enabled: window.__term.state.alert.on, victim, hits: a.hits.length, rows };
+  `);
+  assert(r.enabled, '告警没开启');
+  assert(r.hits >= 1, '模拟突破阈值后没命中');
+  assert(r.rows >= 1, '告警列表没渲染');
+});
+
+test('大图：持仓量叠加（pane 2）', async (s) => {
+  const r = await s.ev(`
+    const big = window.__term.big;
+    if (big.isOpen()) big.close();
+    await new Promise(r=>setTimeout(r,300));
+    big.open('BTCUSDT@f','1m');
+    await new Promise(r=>setTimeout(r,3800));
+    document.querySelector('#bc-oi-btn').click();
+    await new Promise(r=>setTimeout(r,4200));
+    const panes = big.cell.chart.panes().length;
+    const rows = big.oiData ? big.oiData.length : 0;
+    document.querySelector('#bc-oi-btn').click();
+    await new Promise(r=>setTimeout(r,500));
+    const after = big.cell.chart.panes().length;
+    big.close();
+    await new Promise(r=>setTimeout(r,400));
+    return { panes, rows, after };
+  `);
+  assertEq(r.panes, 3, '开持仓量后应该有 3 个窗格');
+  assert(r.rows > 10, '持仓量数据太少：' + r.rows);
+  assert(r.after < 3, '关掉持仓量后窗格没减少');
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();
