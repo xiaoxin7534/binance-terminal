@@ -16,7 +16,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const CDP_PORT = Number(process.env.E2E_CDP_PORT || 9333);
+const CDP_PORT = Number(process.env.E2E_CDP_PORT || 9444);
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:8848';
 const FILTER = process.argv.find((a) => !a.startsWith('-') && a !== process.argv[0] && a !== process.argv[1]) || '';
 const HEADED = process.argv.includes('--headed');

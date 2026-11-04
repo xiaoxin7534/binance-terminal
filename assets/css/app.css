@@ -3,15 +3,20 @@
    ========================================================================== */
 
 :root {
-  --bg: #e9ecf0;
+  /* 字体：苹方优先（Mac 自带），Windows 没有就退到最接近的黑体 */
+  --font: "PingFangLocal", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Source Han Sans SC",
+          -apple-system, "Segoe UI Variable Display", "Segoe UI",
+          "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+
+  --bg: #eef1f6;
   --panel: #ffffff;
-  --panel-2: #f7f8fa;
-  --panel-3: #f1f3f6;
-  --border: #e2e5ea;
-  --border-2: #d3d8df;
-  --text: #12161c;
-  --text-2: #49525d;
-  --muted: #8a929e;
+  --panel-2: #f8fafc;
+  --panel-3: #f2f4f8;
+  --border: #e4e8ef;
+  --border-2: #d5dbe5;
+  --text: #10151c;
+  --text-2: #4a5563;
+  --muted: #8b95a3;
   /* 涨跌配色：美国模式（涨=绿 / 跌=红）。想切回 A 股习惯只改这一组 */
   --up: #0f9d63;
   --up-soft: rgba(15, 157, 99, .10);
@@ -28,15 +33,16 @@
   --bid: #0f9d63;
   --ok: #0f9d63;
   --danger: #e5484d;
-  --accent: #2563eb;
-  --accent-soft: rgba(37, 99, 235, .10);
-  --hover: #f1f3f7;
-  --shadow-1: 0 1px 2px rgba(16, 24, 40, .05);
-  --shadow-2: 0 8px 28px rgba(16, 24, 40, .13), 0 2px 8px rgba(16, 24, 40, .07);
-  --r: 6px;
+  --accent: #2f6fed;
+  --accent-soft: rgba(47, 111, 237, .09);
+  --hover: #f2f5f9;
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 1px rgba(16, 24, 40, .03);
+  --shadow-2: 0 16px 40px rgba(16, 24, 40, .13), 0 3px 10px rgba(16, 24, 40, .05);
+  --r: 8px;
   --row-h: 30px;
   --thead-h: 34px;
-  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+  --mono: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Mono", Consolas,
+          "Liberation Mono", monospace;
 }
 
 [data-theme="dark"] {
@@ -63,11 +69,11 @@
   --bid: #22c98c;
   --ok: #22c98c;
   --danger: #ff5d63;
-  --accent: #4d8bff;
-  --accent-soft: rgba(77, 139, 255, .14);
-  --hover: #1a212b;
+  --accent: #5b93ff;
+  --accent-soft: rgba(91, 147, 255, .13);
+  --hover: #1b2330;
   --shadow-1: 0 1px 2px rgba(0, 0, 0, .35);
-  --shadow-2: 0 10px 34px rgba(0, 0, 0, .55);
+  --shadow-2: 0 18px 44px rgba(0, 0, 0, .58), 0 3px 10px rgba(0, 0, 0, .35);
 }
 
 * { box-sizing: border-box; }
@@ -81,8 +87,7 @@ html, body {
 body {
   background: var(--bg);
   color: var(--text);
-  font: 12px/1.45 "Inter", -apple-system, "Segoe UI", "PingFang SC",
-        "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  font: 12px/1.45 var(--font);
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   transition: background .18s, color .18s;
@@ -90,9 +95,14 @@ body {
 
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: none; background: none; padding: 0; }
-::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
 
 .up { color: var(--up); }
@@ -110,8 +120,8 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 
 /* ---------------------------------------------------------------- 顶栏 */
 .topbar {
-  height: 44px;
-  flex: 0 0 44px;
+  height: 46px;
+  flex: 0 0 46px;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -2005,3 +2015,116 @@ kbd {
 /* 收起详情 */
 .view-list.dt-off .detail,
 .view-list.dt-off .dt-resize { display: none; }
+
+/* ==========================================================================
+   UI 润色（2026-11-05）
+   原则：只调视觉，不动任何影响布局计算的尺寸（行高/列宽/padding 都不碰）
+   ========================================================================== */
+
+/* 顶栏：用一层极淡投影代替生硬的 1px 边，层次更轻 */
+.topbar {
+  border-bottom-color: transparent;
+  box-shadow: 0 1px 0 var(--border), 0 2px 10px rgba(16, 24, 40, .035);
+}
+[data-theme="dark"] .topbar {
+  box-shadow: 0 1px 0 var(--border), 0 2px 12px rgba(0, 0, 0, .3);
+}
+
+/* 品牌副标题更收敛 */
+.brand em {
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  opacity: .45;
+}
+
+/* 表头：字更小、字距更开，退到背景里 */
+.thead {
+  font-size: 10.5px;
+  letter-spacing: .35px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* 交互元素统一过渡曲线，避免各处快慢不一 */
+button,
+.chip,
+.seg button,
+.icon-btn,
+.sector-select,
+.sector-chip,
+.menu-item {
+  transition: background .14s ease, color .14s ease,
+              border-color .14s ease, box-shadow .14s ease;
+}
+
+/* 弹层：统一的浮起感 */
+.popover,
+.help-box,
+.sc-box,
+.al-box {
+  box-shadow: var(--shadow-2);
+  border-radius: 10px;
+}
+
+/* 详情面板分区标题更克制 */
+.dt-section h4 {
+  font-size: 9.5px;
+  letter-spacing: .9px;
+}
+
+/* 面板之间的分隔线降一档，避免整屏都是灰线 */
+.watch { border-right-color: var(--border); }
+.detail { border-left-color: var(--border); }
+
+/* 数字用等宽，避免跳动 */
+.cell-price,
+.cell-chg,
+.dt-price .v,
+.bc-px,
+.sc-num,
+.book-row .bp,
+.book-row .bq,
+.book-row .bc,
+.trade-row span {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 工具栏子项不许被压缩（之前「扫描器」「告警」被挤成「扫描」「告」） */
+.toolbar > *,
+.toolbar .tb-group,
+.toolbar .chip,
+.toolbar .switch {
+  flex: 0 0 auto;
+}
+.toolbar .chip { white-space: nowrap; }
+
+/* 苹方本地字体：系统装了就直接用（Mac 自带 / Windows 手动装），
+   没装就退到 --font 里后面的字体。把字体文件放到 assets/css/fonts/ 也能生效。 */
+@font-face {
+  font-family: "PingFangLocal";
+  src: local("PingFang SC"), local("PingFangSC-Regular"),
+       local("PingFang SC Regular"),
+       url("fonts/PingFangSC-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "PingFangLocal";
+  src: local("PingFang SC Semibold"), local("PingFangSC-Semibold"),
+       url("fonts/PingFangSC-Semibold.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+
+/* 顶栏上的全局功能按钮（从工具栏挪过来的） */
+.top-chip {
+  height: 26px;
+  padding: 0 10px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  background: var(--panel-3);
+  color: var(--text-2);
+}
+.top-chip:hover { background: var(--hover); color: var(--text); }
