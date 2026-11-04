@@ -344,6 +344,14 @@ function switchView(view) {
 }
 
 /* ------------------------------------------------------------------ 自选栏开关 */
+/* ------------------------------------------------------------------ 快捷键面板 */
+function toggleHelp(force) {
+  const el = $('#help');
+  if (!el) return;
+  const show = force === undefined ? el.classList.contains('hidden') : !!force;
+  el.classList.toggle('hidden', !show);
+}
+
 function toggleWatch() {
   state.watchOpen = !state.watchOpen;
   save();
@@ -431,6 +439,11 @@ function bindToolbar() {
     applyTheme(state.theme === 'dark' ? 'light' : 'dark');
   });
 
+  $('#help-close').addEventListener('click', () => toggleHelp(false));
+  $('#help').addEventListener('click', (e) => {
+    if (e.target.id === 'help') toggleHelp(false);
+  });
+
   document.querySelectorAll('#tabs button').forEach((b) => {
     b.addEventListener('click', () => switchView(b.dataset.view));
   });
@@ -476,6 +489,16 @@ async function boot() {
   // 大图模式：双击品种进入，带绘图 + OHLC 明细
   big = new BigChart($('#bigchart'), {
     onClose: () => syncSubs(),
+    // 左右键翻品种：列表视图用列表当前的行顺序，否则用同列的筛选结果
+    symbolList: () => (state.view === 'list' && list && list.symbols
+      ? list.symbols()
+      : grid.filteredSymbols(state.mkt, state.tab, state.sector)),
+    onSymbolChange: (sym) => {
+      state.selected = sym;
+      save();
+      if (watch) watch.setActive(sym);
+      if (state.view === 'list' && list) list.select(sym);
+    },
     onIndicatorsChanged: () => {
       save();
       markActive();
@@ -605,6 +628,8 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') e.target.blur();
     return;
   }
+  if (e.key === '?') { e.preventDefault(); toggleHelp(); return; }
+  if (e.key === 'Escape' && !$('#help').classList.contains('hidden')) { toggleHelp(false); return; }
   // 大图模式下先交给它自己处理，其余全局快捷键一律让路
   if (big && big.isOpen()) {
     if (e.key === 't' || e.key === 'T') { applyTheme(state.theme === 'dark' ? 'light' : 'dark'); return; }

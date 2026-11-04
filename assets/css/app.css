@@ -1532,3 +1532,77 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   left: 6px;
   top: 6px;
 }
+
+/* ==========================================================================
+   快捷键面板
+   ========================================================================== */
+.help {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 14, 20, .34);
+  backdrop-filter: blur(2px);
+}
+.help-box {
+  width: min(680px, calc(100vw - 40px));
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-2);
+  padding: 16px 18px 18px;
+}
+.help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.help-head h3 { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: .3px; }
+.help-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 26px;
+}
+@media (max-width: 720px) { .help-grid { grid-template-columns: 1fr; } }
+.help-col h4 {
+  margin: 12px 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: .8px;
+  text-transform: uppercase;
+}
+.help-col h4:first-child { margin-top: 0; }
+.hk {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 0;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.hk span { margin-left: 6px; }
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--panel-3);
+  border: 1px solid var(--border-2);
+  border-bottom-width: 2px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text);
+  text-align: center;
+  line-height: 1.5;
+}
+.help-tip {
+  margin: 12px 0 0;
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}

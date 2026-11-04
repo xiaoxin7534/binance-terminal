@@ -554,6 +554,11 @@ export class ListView {
     }
   }
 
+  /** 当前筛选 + 排序下的全部 symbol（大图左右键翻品种用） */
+  symbols() {
+    return this.rows.map((r) => r.s);
+  }
+
   select(sym) {
     this.selected = sym;
     state.selected = sym;

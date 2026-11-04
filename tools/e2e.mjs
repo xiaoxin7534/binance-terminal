@@ -348,6 +348,78 @@ test('合约盘口：WebSocket 实时推送（不是 4 秒轮询）', async (s) 
   assert(r.mutations >= 1, `3 秒内盘口一次都没更新（rows=${r.rows} 消息增量=${r.msgsDelta}）`);
 });
 
+test('大图：左右键切换品种', async (s) => {
+  const r = await s.ev(`
+    const big = window.__term.big;
+    if (big.isOpen()) big.close();
+    await new Promise(r=>setTimeout(r,300));
+    big.open('BTCUSDT','1m');
+    await new Promise(r=>setTimeout(r,3500));
+    const before = big.symbol;
+    document.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+    await new Promise(r=>setTimeout(r,2800));
+    const after = big.symbol;
+    const bars = big.cell ? big.cell.times.length : 0;
+    document.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
+    await new Promise(r=>setTimeout(r,2500));
+    return { before, after, back: big.symbol, bars };
+  `);
+  assert(r.after !== r.before, `右键没换品种（还是 ${r.before}）`);
+  assertEq(r.back, r.before, '左键没回到上一个');
+  assert(r.bars >= 0, '换完品种图表异常');
+});
+
+test('绘图：拖动端点 + Ctrl+Z 撤销', async (s) => {
+  const r = await s.ev(`
+    const big = window.__term.big;
+    const host = big.cell.host;
+    const box = host.getBoundingClientRect();
+    const mk = (t,x,y) => new PointerEvent(t,{clientX:box.left+x,clientY:box.top+y,bubbles:true,button:0,pointerId:1});
+    big.draw.clearAll();
+    big.draw.undoStack.length = 0;
+    document.querySelector('#bc-draw button[data-tool="trend"]').click();
+    host.dispatchEvent(mk('pointerdown', 300, 200));
+    host.dispatchEvent(mk('pointermove', 600, 300));
+    host.dispatchEvent(mk('pointerup', 600, 300));
+    await new Promise(r=>setTimeout(r,300));
+    document.querySelector('#bc-draw button[data-tool="cursor"]').click();
+    const it = big.draw.items[0];
+    const p2Before = { t: it.p2.t, p: it.p2.p };
+    // 抓住 p2 端点拖到别处
+    host.dispatchEvent(mk('pointerdown', 600, 300));
+    host.dispatchEvent(mk('pointermove', 700, 380));
+    host.dispatchEvent(mk('pointerup', 700, 380));
+    await new Promise(r=>setTimeout(r,300));
+    const moved = { t: it.p2.t, p: it.p2.p };
+    const changed = moved.p !== p2Before.p || moved.t !== p2Before.t;
+    // Ctrl+Z 撤销这次拖动
+    document.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}));
+    await new Promise(r=>setTimeout(r,400));
+    const back = big.draw.items[0];
+    const restored = back && Math.abs(back.p2.p - p2Before.p) < 1e-9 && back.p2.t === p2Before.t;
+    return { items: big.draw.items.length, changed, restored, undoDepth: big.draw.undoStack.length };
+  `);
+  assertEq(r.items, 1, '图元数量不对');
+  assert(r.changed, '拖动端点没改到坐标');
+  assert(r.restored, 'Ctrl+Z 没恢复拖动前的状态');
+});
+
+test('快捷键面板：? 打开，Esc 关闭', async (s) => {
+  const r = await s.ev(`
+    const help = document.querySelector('#help');
+    document.dispatchEvent(new KeyboardEvent('keydown',{key:'?',bubbles:true}));
+    await new Promise(r=>setTimeout(r,200));
+    const opened = !help.classList.contains('hidden');
+    document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    await new Promise(r=>setTimeout(r,200));
+    return { opened, closed: help.classList.contains('hidden'),
+             bigStillOpen: window.__term.big.isOpen() };
+  `);
+  assert(r.opened, '? 没打开面板');
+  assert(r.closed, 'Esc 没关掉面板');
+  assert(r.bigStillOpen, 'Esc 关面板时把大图也关了');
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();

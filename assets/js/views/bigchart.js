@@ -52,9 +52,11 @@ class DrawLayer {
     this.tool = null;      // null = 光标模式
     this.draft = null;
     this.dragging = false;
+    this.drag = null;      // 光标模式下拖动已有图元的端点
     this.sel = -1;
     this.key = '';
     this.raf = 0;
+    this.undoStack = [];
 
     this.onDown = this.onDown.bind(this);
     this.onMove = this.onMove.bind(this);
@@ -138,7 +140,29 @@ class DrawLayer {
     this.schedule();
   }
 
+  /* ---------------- 撤销 ---------------- */
+  pushUndo() {
+    this.undoStack.push(JSON.stringify(this.items));
+    if (this.undoStack.length > 40) this.undoStack.shift();
+  }
+
+  undo() {
+    if (!this.undoStack.length) return false;
+    const snap = this.undoStack.pop();
+    try {
+      this.items = JSON.parse(snap) || [];
+    } catch (e) {
+      return false;
+    }
+    this.sel = -1;
+    this.persist();
+    this.schedule();
+    return true;
+  }
+
   clearAll() {
+    if (!this.items.length) return;
+    this.pushUndo();
     this.items = [];
     this.sel = -1;
     this.persist();
@@ -147,6 +171,7 @@ class DrawLayer {
 
   removeSelected() {
     if (this.sel < 0 || this.sel >= this.items.length) return false;
+    this.pushUndo();
     this.items.splice(this.sel, 1);
     this.sel = -1;
     this.persist();
@@ -156,9 +181,24 @@ class DrawLayer {
 
   /* ---------------- 交互 ---------------- */
   onDown(e) {
-    if (!this.tool || e.button !== 0) return;
+    if (e.button !== 0) return;
     const pt = this.pointAt(e);
     if (!pt) return;
+
+    // 光标模式：抓住端点就拖动改图元，否则交给图表平移
+    if (!this.tool) {
+      const box = this.host.getBoundingClientRect();
+      const h = this.hitHandle(e.clientX - box.left, e.clientY - box.top);
+      if (!h) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.pushUndo();
+      this.drag = { i: h.i, which: h.which };
+      this.sel = h.i;
+      this.schedule();
+      return;
+    }
+
     e.preventDefault();
     e.stopPropagation();
     this.draft = { type: this.tool, p1: pt, p2: { t: pt.t, p: pt.p } };
@@ -167,6 +207,24 @@ class DrawLayer {
   }
 
   onMove(e) {
+    if (this.drag) {
+      const pt = this.pointAt(e);
+      if (!pt) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const it = this.items[this.drag.i];
+      if (!it) return;
+      if (it.type === 'hline') {
+        it.p1 = pt;
+        if (it.p2) it.p2 = { t: pt.t, p: pt.p };
+      } else if (this.drag.which === 'p1') {
+        it.p1 = pt;
+      } else {
+        it.p2 = pt;
+      }
+      this.schedule();
+      return;
+    }
     if (!this.dragging || !this.draft) return;
     const pt = this.pointAt(e);
     if (!pt) return;
@@ -177,6 +235,14 @@ class DrawLayer {
   }
 
   onUp(e) {
+    if (this.drag) {
+      this.drag = null;
+      e.preventDefault();
+      e.stopPropagation();
+      this.persist();
+      this.schedule();
+      return;
+    }
     if (!this.dragging) return;
     this.dragging = false;
     const d = this.draft;
@@ -186,10 +252,31 @@ class DrawLayer {
     e.stopPropagation();
     const flat = Math.abs(d.p2.p - d.p1.p) < 1e-12 && d.p2.t === d.p1.t;
     if (d.type === 'hline' || !flat) {
+      this.pushUndo();
       this.items.push(d);
       this.persist();
     }
     this.schedule();
+  }
+
+  /** 光标位置附近有没有可拖的端点 / 水平线 */
+  hitHandle(x, y) {
+    const TOL = 8;
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const it = this.items[i];
+      const y1 = this.yOf(it.p1.p);
+      if (y1 == null) continue;
+      if (it.type === 'hline') {
+        if (Math.abs(y - y1) <= TOL) return { i, which: 'p1' };
+        continue;
+      }
+      const x1 = this.xOf(it.p1.t);
+      if (x1 != null && Math.hypot(x - x1, y - y1) <= TOL) return { i, which: 'p1' };
+      const x2 = this.xOf(it.p2 && it.p2.t);
+      const y2 = this.yOf(it.p2 && it.p2.p);
+      if (x2 != null && y2 != null && Math.hypot(x - x2, y - y2) <= TOL) return { i, which: 'p2' };
+    }
+    return null;
   }
 
   /** 光标模式下点一下：命中已有图元就选中，方便 Delete 删除 */
@@ -707,11 +794,28 @@ export class BigChart {
     if (this.draw) this.draw.schedule();
   }
 
+  /** 在当前筛选结果里前后翻一个品种（左右键） */
+  step(dir) {
+    const list = (this.ctx.symbolList && this.ctx.symbolList()) || [];
+    if (!list.length) return;
+    let i = list.indexOf(this.symbol);
+    if (i < 0) i = 0;
+    const next = list[(i + dir + list.length) % list.length];
+    if (!next || next === this.symbol) return;
+    this.open(next, this.interval);
+    if (this.ctx.onSymbolChange) this.ctx.onSymbolChange(next);
+  }
+
   /* ---------------- 键盘 ---------------- */
   /** 返回 true 表示按键已被大图消费 */
   onKey(e) {
     if (!this.isOpen()) return false;
     if (e.key === 'Escape') { this.close(); return true; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (this.draw) this.draw.undo();
+      return true;
+    }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (this.draw && this.draw.removeSelected()) {
         e.preventDefault();
@@ -720,10 +824,8 @@ export class BigChart {
       return false;
     }
     if (e.key === 'v' || e.key === 'V') { this.setTool('cursor'); return true; }
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      // 左右键微调绘图位置太复杂，先留给浏览器
-      return false;
-    }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); this.step(-1); return true; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); this.step(1); return true; }
     return false;
   }
 }
