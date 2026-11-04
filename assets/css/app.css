@@ -787,15 +787,35 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 
 /* ------------------------------------------------------------- 详情栏 */
 .detail {
-  width: 336px;
-  flex: 0 0 336px;
+  /* 三个区块左中右并排，所以要宽一些；窄屏按 46vw 收 */
+  width: min(660px, 46vw);
+  flex: 0 0 min(660px, 46vw);
   border-left: 1px solid var(--border);
   background: var(--panel);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+/* 头部 + 迷你走势横跨整行，下面三列各自滚动 */
+.dt-cols {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.dt-col {
+  flex: 1 1 0;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  border-right: 1px solid var(--border);
+  scrollbar-width: thin;
 }
+.dt-col:last-child { border-right: none; }
+/* 盘口三列数据最挤，给它多一点宽度 */
+.dt-col:nth-child(1) { flex: 1; }
+.dt-col:nth-child(2) { flex: 1.18; }
+.dt-col:nth-child(3) { flex: 0.92; }
+.dt-col .dt-section { border-bottom: none; }
 .dt-head {
   padding: 14px 14px 12px;
   border-bottom: 1px solid var(--border);
@@ -1855,51 +1875,91 @@ kbd {
   transition: background .12s, color .12s;
 }
 .book-step:hover { color: var(--text); background: var(--hover); opacity: 1; }
-.book-grid {
+/* 盘口：上下竖置，价格 / 数量 / 合计 三列 */
+.book-head,
+.book-row {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
+  gap: 4px;
+  padding: 0 4px;
+  align-items: center;
+}
+.book-head {
+  height: 18px;
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: .3px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.book-head span:not(:first-child) { text-align: right; }
+.book-row {
+  position: relative;
+  height: 17px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.book-row .bp { font-family: var(--mono); font-size: 10.5px; position: relative; z-index: 2; }
+.book-row .bq,
+.book-row .bc {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-align: right;
+  color: var(--text-2);
+  position: relative;
+  z-index: 2;
+}
+.book-row .bc { color: var(--muted); }
+.book-row.ask .bp { color: var(--ask); }
+.book-row.bid .bp { color: var(--bid); }
+
+/* 当前价那一行 */
+.book-last {
   display: flex;
-  gap: 12px;
+  align-items: baseline;
+  gap: 5px;
+  height: 24px;
+  padding: 0 4px;
+  margin: 2px 0;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
 }
-.book-col {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+.book-last i { font-style: normal; font-size: 11px; }
+.book-last em {
+  font-style: normal;
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--muted);
 }
-/* 中间一条竖线把买盘卖盘分开 */
-.book-col:first-child {
-  border-right: 1px solid var(--border);
-  padding-right: 10px;
-}
-.book-rows {
-  display: flex;
-  flex-direction: column-reverse;   /* 卖一/买一贴底，靠近价差行 */
-}
-/* S / B 竖置表头 */
-.book-side {
+.book-last.up { color: var(--up); }
+.book-last.down { color: var(--down); }
+
+/* 底部买卖力量条 */
+.book-ratio {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 3px 4px;
-  margin-bottom: 3px;
-  border-bottom: 1px solid var(--border);
-  font-size: 9px;
-  letter-spacing: .4px;
-}
-.book-side i {
-  font-style: normal;
-  font-weight: 700;
+  gap: 6px;
+  margin-top: 8px;
   font-size: 9.5px;
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  display: grid;
-  place-items: center;
-  color: #fff;
+  font-family: var(--mono);
 }
-.book-side.ask { color: var(--ask); }
-.book-side.ask i { background: var(--ask); }
-.book-side.bid { color: var(--bid); }
-.book-side.bid i { background: var(--bid); }
+.book-ratio-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ask);
+  overflow: hidden;
+}
+.book-ratio-bar i {
+  display: block;
+  height: 100%;
+  background: var(--bid);
+  transition: width .25s;
+}
 
 /* 行情统计里「24h 数据」和「合约数据」之间的分隔 */
 .kv-divider {

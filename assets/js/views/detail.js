@@ -237,6 +237,8 @@ export class DetailPanel {
         <div class="dt-chart" data-role="chart"></div>
         <span class="dt-chart-tag">近 2 小时</span>
       </div>
+      <div class="dt-cols">
+      <div class="dt-col">
       <div class="dt-section">
         <h4>行情统计<span class="cd" data-role="cd"></span><span class="line"></span></h4>
         <div class="kv-grid">
@@ -272,14 +274,20 @@ export class DetailPanel {
         <div class="fhist" data-role="fhist"></div>
         </div>` : ''}
       </div>
+      </div>
+      <div class="dt-col">
       <div class="dt-section">
         <h4>盘口<span class="line"></span><button class="book-tag book-step" data-role="step" title="价格合并粒度">${this.stepLabel()}</button></h4>
         <div class="book" data-role="book"><div class="muted" style="padding:8px 4px">等待盘口数据…</div></div>
       </div>
+      </div>
+      <div class="dt-col">
       <div class="dt-section" style="border-bottom:none">
         <h4>最近成交<span class="line"></span></h4>
         <div class="trade-head"><span>价格</span><span>数量</span><span>时间</span></div>
         <div class="trades" data-role="trades"><div class="muted" style="padding:6px 4px">等待成交…</div></div>
+      </div>
+      </div>
       </div>`;
 
     this.$ = (r) => this.root.querySelector(`[data-role="${r}"]`);
@@ -477,25 +485,47 @@ export class DetailPanel {
     const spread = bestAsk && bestBid ? bestAsk - bestBid : null;
     const spreadPct = bestAsk && bestBid ? ((bestAsk - bestBid) / bestAsk) * 100 : null;
 
-    const cell = (p, q, side) => `<div class="book-row ${side}">
+    // 累计量：卖盘从卖1 往上加，买盘从买1 往下加
+    const askCum = [];
+    let acc = 0;
+    for (const [, q] of asks) { acc += q; askCum.push(acc); }
+    const bidCum = [];
+    acc = 0;
+    for (const [, q] of bids) { acc += q; bidCum.push(acc); }
+
+    const cell = (p, q, cum, side) => `<div class="book-row ${side}">
       <span class="bar" style="width:${(q / maxQ) * 100}%"></span>
-      <span class="bp">${fmtPrice(p, dp)}</span><span class="bq">${fmtQty(q)}</span></div>`;
+      <span class="bp">${fmtPrice(p, dp)}</span>
+      <span class="bq">${fmtQty(q)}</span>
+      <span class="bc">${fmtCompact(cum)}</span></div>`;
 
-    const askCol = asks.map(([p, q]) => cell(p, q, 'ask')).join('');
-    const bidCol = bids.map(([p, q]) => cell(p, q, 'bid')).join('');
+    // 卖盘从上到下：卖10 → 卖1
+    const askHtml = asks.map(([p, q], i) => cell(p, q, askCum[i], 'ask')).reverse().join('');
+    const bidHtml = bids.map(([p, q], i) => cell(p, q, bidCum[i], 'bid')).join('');
 
-    this.bookEl.innerHTML = `<div class="book-grid">
-        <div class="book-col">
-          <div class="book-side ask"><i>S</i><span>卖出</span></div>
-          <div class="book-rows">${askCol}</div>
-        </div>
-        <div class="book-col">
-          <div class="book-side bid"><i>B</i><span>买入</span></div>
-          <div class="book-rows">${bidCol}</div>
-        </div>
+    const row = market.get(this.symbol) || {};
+    const lastPx = row.l || (bids[0] ? bids[0][0] : 0);
+    const up = (row.chgp || 0) >= 0;
+
+    // 买卖力量对比（按当前这 20 档的总量）
+    const sumBid = bidCum[bidCum.length - 1] || 0;
+    const sumAsk = askCum[askCum.length - 1] || 0;
+    const tot = sumBid + sumAsk || 1;
+    const bidPct = (sumBid / tot) * 100;
+
+    this.bookEl.innerHTML = `
+      <div class="book-head"><span>价格</span><span>数量</span><span>合计</span></div>
+      ${askHtml}
+      <div class="book-last ${up ? 'up' : 'down'}">
+        <span>${fmtPrice(lastPx, dp)}</span><i>${up ? '↑' : '↓'}</i>
+        <em>${spread == null ? '' : '价差 ' + fmtPrice(spread, dp) + ' (' + spreadPct.toFixed(3) + '%)'}</em>
       </div>
-      <div class="spread-row">价差 <b>${spread == null ? '--' : fmtPrice(spread, dp)}</b>
-        <span>${spreadPct == null ? '' : spreadPct.toFixed(3) + '%'}</span></div>`;
+      ${bidHtml}
+      <div class="book-ratio">
+        <span class="up">B ${bidPct.toFixed(1)}%</span>
+        <div class="book-ratio-bar"><i style="width:${bidPct}%"></i></div>
+        <span class="down">${(100 - bidPct).toFixed(1)}% S</span>
+      </div>`;
   }
 
   onTrade(msg) {

@@ -276,24 +276,30 @@ test('列表：切换视图并选中一行', async (s) => {
   assert(r.sel, '没有选中行');
 });
 
-test('详情面板：盘口两列，买卖各 10 档', async (s) => {
+test('详情面板：三块并排 + 盘口上下竖置', async (s) => {
   await s.ev(`await new Promise(r=>setTimeout(r,6000)); return 1;`);
   const r = await s.ev(`
     const p = document.querySelector('#detail');
-    const asks = [...p.querySelectorAll('.book-row.ask')].map(e => e.querySelector('.bp').textContent);
-    const bids = [...p.querySelectorAll('.book-row.bid')].map(e => e.querySelector('.bp').textContent);
+    const cols = [...p.querySelectorAll('.dt-col')];
     return {
-      cols: p.querySelectorAll('.book-col').length,
-      asks: asks.length, bids: bids.length,
-      toggle: !!p.querySelector('.book-more'),
-      h: Math.round(p.querySelector('.book').getBoundingClientRect().height),
+      cols: cols.length,
+      titles: cols.map(c => (c.querySelector('h4')||{}).textContent || ''),
+      head: [...p.querySelectorAll('.book-head span')].map(e => e.textContent),
+      asks: p.querySelectorAll('.book-row.ask').length,
+      bids: p.querySelectorAll('.book-row.bid').length,
+      last: !!p.querySelector('.book-last'),
+      ratio: !!p.querySelector('.book-ratio'),
     };
   `);
-  assertEq(r.cols, 2, '盘口不是两列');
+  assertEq(r.cols, 3, '详情面板不是三列');
+  assert(r.titles[0].includes('行情统计'), '第一列不是行情统计');
+  assert(r.titles[1].includes('盘口'), '第二列不是盘口');
+  assert(r.titles[2].includes('最近成交'), '第三列不是最近成交');
+  assertEq(r.head.join(','), '价格,数量,合计', '盘口表头不对');
   assertEq(r.asks, 10, '卖档不是 10');
   assertEq(r.bids, 10, '买档不是 10');
-  assert(!r.toggle, '不该再有档位切换按钮');
-  assert(r.h < 260, '盘口太高了：' + r.h + 'px');
+  assert(r.last, '没有当前价行');
+  assert(r.ratio, '没有买卖力量条');
 });
 
 test('列表：双击行进入大图', async (s) => {
