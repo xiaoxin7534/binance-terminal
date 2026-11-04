@@ -33,7 +33,6 @@ export class DetailPanel {
     this.perp = null;
     this.trades = [];
     this.lastDepth = null;
-    this.bookOpen = false;     // 盘口默认 8 档（4 卖 + 4 买），展开后 20 档
     this.pendTimers = [];      // 延后发出的请求（切币时要取消）
     this.renderEmpty();
   }
@@ -266,8 +265,7 @@ export class DetailPanel {
         <div class="fhist" data-role="fhist"></div>
       </div>` : ''}
       <div class="dt-section">
-        <h4>盘口<span class="line"></span><button class="book-more${this.bookOpen ? ' on' : ''}" data-role="bookmore"
-          title="切换盘口档位：8 档 / 20 档">${this.bookOpen ? '20 档 ▴' : '8 档 ▾'}</button></h4>
+        <h4>盘口<span class="line"></span><span class="book-tag">买卖各 10 档</span></h4>
         <div class="book" data-role="book"><div class="muted" style="padding:8px 4px">等待盘口数据…</div></div>
       </div>
       <div class="dt-section" style="border-bottom:none">
@@ -293,16 +291,6 @@ export class DetailPanel {
 
     const closeBtn = this.root.querySelector('[data-role="close"]');
     if (closeBtn && this.opts.onClose) closeBtn.addEventListener('click', () => this.opts.onClose());
-
-    const moreBtn = this.$('bookmore');
-    if (moreBtn) {
-      moreBtn.addEventListener('click', () => {
-        this.bookOpen = !this.bookOpen;
-        moreBtn.classList.toggle('on', this.bookOpen);
-        moreBtn.textContent = this.bookOpen ? '20 档 ▴' : '8 档 ▾';
-        this.renderBook();
-      });
-    }
 
     this.createChart();
     this.updateStats();
@@ -416,10 +404,10 @@ export class DetailPanel {
     const msg = this.lastDepth;
     if (!msg || !this.bookEl) return;
     const dp = dpOf(this.symbol);
-    // 8 档 = 4 卖 + 4 买（默认），展开后 10 + 10。20 档全铺会把「最近成交」顶出可视区
-    const N = this.bookOpen ? 10 : 4;
-    const asks = msg.a.slice(0, N);
-    const bids = msg.b.slice(0, N);
+    // 买卖各 10 档，并排两列：左卖右买，都用 column-reverse 让「卖一/买一」贴底，
+    // 价差行紧跟在下面。10 行的高度 ≈ 原来 20 行的一半，不用再往下滚
+    const asks = msg.a.slice(0, 10);
+    const bids = msg.b.slice(0, 10);
     const maxQ = Math.max(
       ...asks.map((x) => x[1]), ...bids.map((x) => x[1]), 0.0000001
     );
@@ -428,19 +416,19 @@ export class DetailPanel {
     const spread = bestAsk && bestBid ? bestAsk - bestBid : null;
     const spreadPct = bestAsk && bestBid ? ((bestAsk - bestBid) / bestAsk) * 100 : null;
 
-    const rows = [];
-    for (let i = asks.length - 1; i >= 0; i--) {
-      const [p, q] = asks[i];
-      rows.push(`<div class="book-row ask"><span class="bar" style="width:${(q / maxQ) * 100}%"></span>
-        <span class="bp">${fmtPrice(p, dp)}</span><span class="bq">${fmtQty(q)}</span></div>`);
-    }
-    rows.push(`<div class="spread-row">价差 <b>${spread == null ? '--' : fmtPrice(spread, dp)}</b>
-      <span>${spreadPct == null ? '' : spreadPct.toFixed(3) + '%'}</span></div>`);
-    for (const [p, q] of bids) {
-      rows.push(`<div class="book-row bid"><span class="bar" style="width:${(q / maxQ) * 100}%"></span>
-        <span class="bp">${fmtPrice(p, dp)}</span><span class="bq">${fmtQty(q)}</span></div>`);
-    }
-    this.bookEl.innerHTML = rows.join('');
+    const cell = (p, q, side) => `<div class="book-row ${side}">
+      <span class="bar" style="width:${(q / maxQ) * 100}%"></span>
+      <span class="bp">${fmtPrice(p, dp)}</span><span class="bq">${fmtQty(q)}</span></div>`;
+
+    const askCol = asks.map(([p, q]) => cell(p, q, 'ask')).join('');
+    const bidCol = bids.map(([p, q]) => cell(p, q, 'bid')).join('');
+
+    this.bookEl.innerHTML = `<div class="book-grid">
+        <div class="book-col">${askCol}</div>
+        <div class="book-col">${bidCol}</div>
+      </div>
+      <div class="spread-row">价差 <b>${spread == null ? '--' : fmtPrice(spread, dp)}</b>
+        <span>${spreadPct == null ? '' : spreadPct.toFixed(3) + '%'}</span></div>`;
   }
 
   onTrade(msg) {

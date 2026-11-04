@@ -276,20 +276,24 @@ test('列表：切换视图并选中一行', async (s) => {
   assert(r.sel, '没有选中行');
 });
 
-test('详情面板：盘口默认 8 档，可展开 20 档', async (s) => {
+test('详情面板：盘口两列，买卖各 10 档', async (s) => {
   await s.ev(`await new Promise(r=>setTimeout(r,6000)); return 1;`);
   const r = await s.ev(`
     const p = document.querySelector('#detail');
-    const n1 = p.querySelectorAll('.book-row').length;
-    const btn = p.querySelector('.book-more');
-    if (btn) btn.click();
-    await new Promise(r=>setTimeout(r,500));
-    const n2 = p.querySelectorAll('.book-row').length;
-    if (btn) btn.click();
-    return { n1, n2 };
+    const asks = [...p.querySelectorAll('.book-row.ask')].map(e => e.querySelector('.bp').textContent);
+    const bids = [...p.querySelectorAll('.book-row.bid')].map(e => e.querySelector('.bp').textContent);
+    return {
+      cols: p.querySelectorAll('.book-col').length,
+      asks: asks.length, bids: bids.length,
+      toggle: !!p.querySelector('.book-more'),
+      h: Math.round(p.querySelector('.book').getBoundingClientRect().height),
+    };
   `);
-  assertEq(r.n1, 8, '默认档位不是 8');
-  assertEq(r.n2, 20, '展开后不是 20 档');
+  assertEq(r.cols, 2, '盘口不是两列');
+  assertEq(r.asks, 10, '卖档不是 10');
+  assertEq(r.bids, 10, '买档不是 10');
+  assert(!r.toggle, '不该再有档位切换按钮');
+  assert(r.h < 260, '盘口太高了：' + r.h + 'px');
 });
 
 test('列表：双击行进入大图', async (s) => {

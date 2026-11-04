@@ -1831,3 +1831,35 @@ kbd {
 }
 /* 用户拖过图、已经偏离自动取景时，按钮常亮提示可以复位 */
 .bc-reset.off { opacity: 1; color: var(--accent); border-color: rgba(37, 99, 235, .35); }
+
+/* ==========================================================================
+   盘口两列（买卖各 10 档并排，卖一/买一贴底）
+   ========================================================================== */
+.book-tag {
+  font-size: 9px;
+  letter-spacing: .2px;
+  text-transform: none;
+  color: var(--muted);
+  opacity: .8;
+}
+.book-grid {
+  display: flex;
+  gap: 8px;
+}
+.book-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column-reverse;   /* 卖一/买一贴底，靠近价差行 */
+}
+.book-col .book-row {
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  padding: 1px 3px;
+  height: 17px;
+}
+.book-col .book-row .bp { font-size: 10.5px; }
+.book-col .book-row .bq { font-size: 9.5px; }
+/* 左列价格靠左、数量靠右；右列同理，视觉上像两块对称的表 */
+.book-col:last-child .book-row .bp { text-align: right; }
+.book-col:last-child .book-row .bq { text-align: right; }
