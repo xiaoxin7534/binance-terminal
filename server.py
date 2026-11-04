@@ -52,7 +52,11 @@ LISTING_CACHE = os.path.join(CACHE_DIR, "listing.json")
 KLINES_FILE = os.path.join(CACHE_DIR, "klines.json")
 SECTORS_FILE = os.path.join(ROOT, "assets", "data", "sectors.json")
 
-REST_HOST = "data-api.binance.vision"
+# 现货 REST：.vision 是币安给受限地区的公开行情域名，.me 是另一条不查地区的线路
+REST_HOST = os.environ.get("BINANCE_REST_HOST") or "data-api.binance.vision"
+REST_HOST_ALT = "api.binance.me"
+# 合约直连域名：探测成功就填进来，之后合约请求不走代理
+FAPI_DIRECT = None
 WS_HOST = "data-stream.binance.vision"
 FAPI_HOST = "www.binance.com"           # 合约 REST（网页版网关，fapi.binance.com 被 451）
 FWS_HOST = "fstream.binance.com"        # 合约 WebSocket（需要代理）
@@ -95,6 +99,31 @@ def log(*args):
 
 # ---- 本机 SOCKS5 代理探测（v2rayN / Clash 等） ----
 SOCKS_PROXY = None
+
+
+def probe_fapi_direct():
+    """试一下合约接口能不能直连。
+
+    币安合约 API 在受限地区返回 451，而且 fapi 域名本身被 DNS 污染，
+    所以绝大多数情况必须走代理。但换个网络环境（或币安改策略）就可能通，
+    通了延迟能从 2~4 秒降到 200ms，值得每次启动花 4 秒试一下。
+    """
+    global FAPI_DIRECT
+    for host in ("fapi.binance.com", "fapi1.binance.com", "fapi2.binance.com"):
+        try:
+            ctx = ssl.create_default_context()
+            conn = http.client.HTTPSConnection(host, timeout=4, context=ctx)
+            conn.request("GET", "/fapi/v1/ping", headers={"User-Agent": UA})
+            r = conn.getresponse()
+            r.read()
+            conn.close()
+            if r.status == 200:
+                FAPI_DIRECT = host
+                log("合约接口可直连（%s），不走代理" % host)
+                return
+        except Exception:           # noqa: BLE001
+            continue
+    log("合约接口无法直连，继续走代理")
 
 
 def detect_proxy():
@@ -188,7 +217,12 @@ def https_via_socks(host, path, timeout=25, headers=None):
 
 
 def fapi_get(path, timeout=25):
-    """合约 REST：优先走代理"""
+    """合约 REST：能直连就直连（延迟差 10 倍），否则走代理"""
+    if FAPI_DIRECT:
+        try:
+            return _http_get_pooled(FAPI_DIRECT, path, timeout)
+        except Exception as e:      # noqa: BLE001
+            log("合约直连失败，回退代理: %s" % e)
     if SOCKS_PROXY:
         status, body = https_via_socks(FAPI_HOST, path, timeout)
         if status == 451:
@@ -286,10 +320,11 @@ def _http_get_pooled(host, path, timeout):
 
 
 def http_get(path, timeout=25):
-    try:
-        return _http_get_pooled(REST_HOST, path, timeout)
-    except Exception:               # noqa: BLE001
-        pass                        # 连接池出问题就退回 urllib，别把功能搞挂
+    for host in (REST_HOST, REST_HOST_ALT):
+        try:
+            return _http_get_pooled(host, path, timeout)
+        except Exception:           # noqa: BLE001
+            continue                # 主域名挂了就试备用
     url = "https://%s%s" % (REST_HOST, path)
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,
@@ -2111,6 +2146,7 @@ def build_server(host, port):
     threading.Thread(target=prefetch_klines, daemon=True).start()
 
     detect_proxy()
+    threading.Thread(target=probe_fapi_direct, daemon=True).start()
     global FUTURES, FUT_DEPTH
     if SOCKS_PROXY:
         FUTURES = FuturesWorker(HUB)
