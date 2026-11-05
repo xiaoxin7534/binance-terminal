@@ -2185,3 +2185,60 @@ button,
   color: var(--text-2);
 }
 .top-chip:hover { background: var(--hover); color: var(--text); }
+
+/* ==========================================================================
+   行情条交互 + 自选清空 + 可撤销提示
+   ========================================================================== */
+
+/* 顶部行情条：可点、可双击、可右键 */
+.tape-item {
+  cursor: pointer;
+  user-select: none;
+  transition: background .12s ease;
+}
+.tape-item:hover { background: var(--hover); }
+.tape-item:active { background: var(--accent-soft); }
+/* 当前选中的品种常亮，和左侧自选栏的高亮一致 */
+.tape-item.on { background: var(--accent-soft); }
+.tape-item.on b { color: var(--accent); }
+
+/* 自选分组标题右侧的「清空」 */
+.w-clear {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: .3px;
+  color: var(--muted);
+  background: none;
+  opacity: 0;
+  pointer-events: none;      /* 隐藏时也不吃点击，避免误触 */
+  transition: opacity .12s, color .12s, background .12s;
+}
+/* 平时不显眼，鼠标进到自选区才露出来，避免误点 */
+#watch:hover .w-clear { opacity: .85; pointer-events: auto; }
+.w-clear:hover {
+  opacity: 1;
+  color: var(--down);
+  background: var(--hover);
+}
+
+/* 带操作的提示条（如「撤销」） */
+.toast.has-act {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.toast-act {
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: .95;
+}
+.toast-act:hover { opacity: 1; }

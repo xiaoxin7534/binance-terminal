@@ -600,6 +600,73 @@ test('窗口缩放：工具栏按钮不被压扁', async (s) => {
   assert(!bad.length, bad.join('；'));
 });
 
+test('行情条：单击选中 / 双击填格子 / 右键菜单', async (s) => {
+  const r = await s.ev(`
+    const items = [...document.querySelectorAll('#tape .tape-item')];
+    if (items.length < 3) return { skip: true };
+    const eth = items.find(e => e.dataset.s === 'ETHUSDT');
+    eth.click();
+    await new Promise(r => setTimeout(r, 500));
+    const clicked = {
+      sel: window.__term.state.selected,
+      on: eth.classList.contains('on'),
+      onCount: document.querySelectorAll('#tape .tape-item.on').length,
+    };
+
+    const sol = items.find(e => e.dataset.s === 'SOLUSDT');
+    sol.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 800));
+    const dbl = { cell0: window.__term.grid.cells[0].symbol, view: window.__term.state.view };
+
+    const bnb = items.find(e => e.dataset.s === 'BNBUSDT');
+    bnb.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await new Promise(r => setTimeout(r, 300));
+    const menu = document.querySelector('.popover.menu');
+    const labels = menu ? [...menu.querySelectorAll('.menu-item span')].map(e => e.textContent) : [];
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 200));
+
+    return { clicked, dbl, labels,
+             cursor: getComputedStyle(items[0]).cursor,
+             menuClosed: !document.querySelector('.popover.menu') };
+  `);
+  if (r.skip) return;
+  assertEq(r.cursor, 'pointer', '行情条没有可点击光标');
+  assertEq(r.clicked.sel, 'ETHUSDT', '单击没切换选中');
+  assert(r.clicked.on, '被点的那一项没高亮');
+  assertEq(r.clicked.onCount, 1, '高亮项不是唯一一个');
+  assertEq(r.dbl.cell0, 'SOLUSDT', '双击没把品种填进格子');
+  assertEq(r.labels.join(','), '在大图中打开,加入自选', '右键菜单项不对：' + r.labels.join(','));
+  assert(r.menuClosed, '菜单没有关掉');
+});
+
+test('自选：一键清空 + 撤销', async (s) => {
+  const r = await s.ev(`
+    const before = window.__term.state.favs.slice();
+    const btn = document.querySelector('#watch-list [data-clear]');
+    if (!btn) return { skip: true, before };
+    btn.click();
+    await new Promise(r => setTimeout(r, 400));
+    const cleared = {
+      favs: window.__term.state.favs.slice(),
+      toast: (document.querySelector('.toast') || {}).textContent || '',
+      hasAct: !!document.querySelector('.toast-act'),
+      btnGone: !document.querySelector('#watch-list [data-clear]'),
+    };
+    const undo = document.querySelector('.toast-act');
+    if (undo) undo.click();
+    await new Promise(r => setTimeout(r, 400));
+    return { before, cleared, after: window.__term.state.favs.slice() };
+  `);
+  if (r.skip) return;
+  assert(r.before.length > 0, '跑之前就没有自选，测不出东西');
+  assertEq(r.cleared.favs.length, 0, '清空后还剩 ' + r.cleared.favs.length + ' 个');
+  assert(r.cleared.toast.includes('已清空'), '没有清空提示：' + r.cleared.toast);
+  assert(r.cleared.hasAct, '提示里没有「撤销」');
+  assert(r.cleared.btnGone, '清空后「清空」按钮还在');
+  assertEq(r.after.join(','), r.before.join(','), '撤销没恢复成原来的自选');
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();

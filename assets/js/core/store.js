@@ -236,3 +236,21 @@ export function toggleFav(sym) {
   save();
   window.dispatchEvent(new CustomEvent('favchange', { detail: sym }));
 }
+
+/** 清空自选，返回清掉的个数（撤销用） */
+export function clearFavs() {
+  const n = state.favs.length;
+  if (!n) return 0;
+  state.favs.length = 0;          // 保持数组引用不变，别处拿着的还是同一个
+  save();
+  window.dispatchEvent(new CustomEvent('favchange', { detail: null }));
+  return n;
+}
+
+/** 恢复一组自选（撤销清空） */
+export function setFavs(list) {
+  state.favs.length = 0;
+  for (const s of list || []) if (!state.favs.includes(s)) state.favs.push(s);
+  save();
+  window.dispatchEvent(new CustomEvent('favchange', { detail: null }));
+}

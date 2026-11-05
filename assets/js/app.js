@@ -4,6 +4,7 @@ import { api, openStream } from './core/api.js';
 import {
   state, market, seedMarket, applyTicks, applyFunding, onFrame, save,
   setSectorLabels, sectorLabels, matchTab, matchMkt, SECTOR_KEYS, TAB_KEYS, TAPE_SYMBOLS,
+  isFav, toggleFav,
 } from './core/store.js';
 import { openMenu } from './core/picker.js';
 import { fmtPrice, fmtPct, dirClass, fmtCompact } from './core/fmt.js';
@@ -91,11 +92,60 @@ function buildTape() {
     if (!r) continue;
     const item = document.createElement('div');
     item.className = 'tape-item';
+    item.dataset.s = sym;
+    item.title = `${r.b}/${r.q} · 单击选中，双击填进图表墙，右键更多`;
     item.innerHTML = `<b>${r.b}</b><span class="p"></span><span class="c"></span>`;
     el.appendChild(item);
-    tapeRefs.set(sym, { p: item.querySelector('.p'), c: item.querySelector('.c') });
+    tapeRefs.set(sym, {
+      el: item,
+      p: item.querySelector('.p'),
+      c: item.querySelector('.c'),
+    });
   }
   updateTape(null);
+  markTapeActive();
+}
+
+/** 行情条高亮当前选中的品种 */
+function markTapeActive() {
+  for (const [sym, ref] of tapeRefs) ref.el.classList.toggle('on', sym === state.selected);
+}
+
+/** 行情条交互：和左侧自选栏保持一致（单击选中 / 双击填格子 / 右键菜单） */
+function bindTape() {
+  const el = $('#tape');
+  if (!el) return;
+
+  el.addEventListener('click', (e) => {
+    const it = e.target.closest('[data-s]');
+    if (it) pickSymbol(it.dataset.s);
+  });
+
+  el.addEventListener('dblclick', (e) => {
+    const it = e.target.closest('[data-s]');
+    if (it) pickToGrid(it.dataset.s);
+  });
+
+  el.addEventListener('contextmenu', (e) => {
+    const it = e.target.closest('[data-s]');
+    if (!it) return;
+    e.preventDefault();
+    const sym = it.dataset.s;
+    openMenu(it, [
+      { key: 'big', label: '在大图中打开' },
+      { divider: true },
+      { key: 'fav', label: isFav(sym) ? '移出自选' : '加入自选' },
+    ], '', (k) => {
+      if (k === 'big') openBig(sym, state.interval);
+      else if (k === 'fav') toggleFav(sym);
+    });
+  });
+}
+
+/** 选中某个品种：自选栏高亮 + 行情条高亮，两处一起同步 */
+function setActiveSymbol(sym) {
+  if (watch) watch.setActive(sym);
+  markTapeActive();
 }
 
 function updateTape(dirty) {
@@ -216,17 +266,34 @@ function updateRowsBtn() {
 let lastFillSig = '';
 
 let toastTimer = 0;
-function toast(msg) {
+/** msg + 可选操作（如「撤销」）。带操作时停留 6 秒，纯文字 1.8 秒 */
+function toast(msg, action) {
   let el = document.querySelector('.toast');
   if (!el) {
     el = document.createElement('div');
     el.className = 'toast';
     document.body.appendChild(el);
   }
-  el.textContent = msg;
+  el.innerHTML = '';
+  const span = document.createElement('span');
+  span.textContent = msg;
+  el.appendChild(span);
+  el.classList.toggle('has-act', !!action);
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 'toast-act';
+    b.textContent = action.label;
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearTimeout(toastTimer);
+      el.classList.remove('show');
+      action.onClick();
+    });
+    el.appendChild(b);
+  }
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  toastTimer = setTimeout(() => el.classList.remove('show'), action ? 6000 : 1800);
 }
 
 /* ------------------------------------------------------------------ 订阅 */
@@ -339,7 +406,7 @@ function openBig(sym, iv) {
   if (state.view === 'list' && list) list.select(sym);
   state.selected = sym;
   save();
-  if (watch) watch.setActive(sym);
+  setActiveSymbol(sym);
   big.open(sym, iv || state.interval);
   syncSubs();
 }
@@ -352,7 +419,7 @@ function showInGridDetail(sym) {
 
 function pickSymbol(sym) {
   if (!sym) return;
-  if (watch) watch.setActive(sym);
+  setActiveSymbol(sym);
   if (state.view === 'list') {
     list.select(sym);              // 走列表的 onSelect：详情 + 订阅一起更新
   } else {
@@ -384,7 +451,7 @@ function switchView(view) {
   });
   $('#view-grid').classList.toggle('hidden', view !== 'grid');
   $('#view-list').classList.toggle('hidden', view !== 'list');
-  if (watch) watch.setActive(state.selected);
+  setActiveSymbol(state.selected);
 
   if (view === 'list') {
     list.onShow();
@@ -541,7 +608,7 @@ async function boot() {
     onFocus: (sym) => {
       state.selected = sym;
       save();
-      if (watch) watch.setActive(sym);
+      setActiveSymbol(sym);
       showInGridDetail(sym);
     },
     // 双击格子 / Enter：进大图
@@ -551,7 +618,7 @@ async function boot() {
     onSelect: (sym) => {
       detail.setSymbol(sym);
       syncSubs();
-      if (watch) watch.setActive(sym);
+      setActiveSymbol(sym);
     },
     // 列表里双击一行 = 直接进大图（和格子里双击一个意思）
     onOpenBig: (sym) => openBig(sym, state.interval),
@@ -578,7 +645,7 @@ async function boot() {
     onSymbolChange: (sym) => {
       state.selected = sym;
       save();
-      if (watch) watch.setActive(sym);
+      setActiveSymbol(sym);
       if (state.view === 'list' && list) list.select(sym);
     },
     onIndicatorsChanged: () => {
@@ -598,13 +665,17 @@ async function boot() {
   watch = new WatchView($('#watch'), {
     onPick: pickSymbol,
     onPickGrid: pickToGrid,
+    toast,
   });
-  watch.setActive(state.selected);
+  // 自选变了就重算订阅：清空之后不该继续挂着那些行情流
+  window.addEventListener('favchange', () => syncSubs());
+  setActiveSymbol(state.selected);
   document.querySelector('.app').classList.toggle('watch-off', !state.watchOpen);
   setListDetail(state.listDetailOpen);
   bindDetailResize();
 
   bindToolbar();
+  bindTape();
   markActive();
   updateSectorBtn();
   updateRowsBtn();
@@ -619,7 +690,7 @@ async function boot() {
     buildTape();
     list.setLabels();
     list.rebuild(true);
-    if (watch) { watch.render(); watch.setActive(state.selected); }
+    if (watch) { watch.render(); setActiveSymbol(state.selected); }
     if (state.gridSector && state.gridSector !== 'all') {
       grid.fillSector(state.gridSector);
       updateSectorBtn();

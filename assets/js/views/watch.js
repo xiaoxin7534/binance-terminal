@@ -1,6 +1,6 @@
 /* 左侧自选栏：自选 + 热门，点一下就把行情拉到主视图 */
 
-import { market, state, isFav, toggleFav, dpOf } from '../core/store.js';
+import { market, state, isFav, toggleFav, clearFavs, setFavs, dpOf } from '../core/store.js';
 import { fmtPrice, fmtPct, dirClass, symLabel } from '../core/fmt.js';
 import { openPicker } from '../core/picker.js';
 
@@ -23,6 +23,21 @@ export class WatchView {
     });
 
     this.listEl.addEventListener('click', (e) => {
+      const clr = e.target.closest('[data-clear]');
+      if (clr) {
+        e.stopPropagation();
+        const prev = state.favs.slice();
+        if (!prev.length) return;
+        clearFavs();
+        // 一键清空 + 可撤销，比弹确认框顺手
+        if (this.ctx.toast) {
+          this.ctx.toast(`已清空 ${prev.length} 个自选`, {
+            label: '撤销',
+            onClick: () => setFavs(prev),
+          });
+        }
+        return;
+      }
       const del = e.target.closest('[data-del]');
       if (del) {
         e.stopPropagation();
@@ -75,7 +90,9 @@ export class WatchView {
   render() {
     const { favs, hot } = this.buildGroups();
     const parts = [];
-    parts.push(`<div class="w-group">自选<span class="n">${favs.length}</span></div>`);
+    parts.push(`<div class="w-group">自选<span class="n">${favs.length}</span>`
+      + (favs.length ? '<button class="w-clear" data-clear title="清空全部自选（可撤销）">清空</button>' : '')
+      + '</div>');
     if (!favs.length) {
       parts.push('<div class="w-empty">还没有自选，点右上角 + 添加<br>或直接双击热门里的代码</div>');
     } else {
