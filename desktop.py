@@ -12,6 +12,7 @@
 import ctypes
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -20,8 +21,29 @@ import traceback
 import urllib.request
 
 APP_NAME = "看盘终端"
-HOST = "127.0.0.1"
+# 默认只监听本机；要给 iPad / 手机看，设 BT_HOST=0.0.0.0（或双击「局域网访问.bat」）
+HOST = (os.environ.get("BT_HOST") or "127.0.0.1").strip()
 PORT = int(os.environ.get("BT_PORT") or 8848)
+
+
+def lan_ip():
+    """取本机在局域网里的 IPv4，取不到返回 None"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))       # 不会真的发包，只为让系统选出口网卡
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:       # noqa: BLE001
+        pass
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if not ip.startswith("127."):
+                return ip
+    except Exception:       # noqa: BLE001
+        pass
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -132,8 +154,15 @@ def open_window(url):
 # --------------------------------------------------------------------------
 
 def run():
-    url = "http://%s:%d/" % (HOST, PORT)
+    # 窗口永远连回环地址：BT_HOST=0.0.0.0 是「绑所有网卡」，不是「访问 0.0.0.0」
+    url = "http://127.0.0.1:%d/" % PORT
     status = url + "api/status"
+    if HOST not in ("127.0.0.1", "localhost"):
+        ip = lan_ip()
+        print("监听 %s:%d（局域网可访问）" % (HOST, PORT))
+        if ip:
+            print("  iPad / 手机打开： http://%s:%d/" % (ip, PORT))
+            print("  首次可能弹 Windows 防火墙，选「允许访问」（专用网络）")
 
     # 已经有实例在跑：只开窗口，不接管服务生命周期
     if alive(status):

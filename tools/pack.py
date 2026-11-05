@@ -30,7 +30,7 @@ EXE = os.path.join(DIST, "BinanceTerminal.exe")
 SRC_TEMPLATES = os.path.join(ROOT, "packaging")
 
 # 分发包里带哪些文件（顺序即 zip 里的顺序）
-TEMPLATES = ["使用说明.txt", "设置代理.bat", "proxy.txt"]
+TEMPLATES = ["使用说明.txt", "设置代理.bat", "proxy.txt", "局域网访问.bat"]
 
 
 def find_pyinstaller():
