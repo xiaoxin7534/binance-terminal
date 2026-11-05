@@ -1,7 +1,14 @@
 /* 与服务端通信：REST + SSE */
 
+// 统一的超时：服务端自己也有超时，但连接被代理挂住时浏览器会等很久，
+// 而调用方（格子）会一直停在"加载中"
+const TIMEOUT_MS = 30000;
+
 const json = async (url) => {
-  const r = await fetch(url, { cache: 'no-store' });
+  const r = await fetch(url, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout ? AbortSignal.timeout(TIMEOUT_MS) : undefined,
+  });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 };

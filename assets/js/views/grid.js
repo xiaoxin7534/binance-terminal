@@ -22,7 +22,10 @@ export class GridView {
     this.scrollRaf = 0;
 
     // 只挂载视野内的图表，其余只留格子外壳
-    this.ro = new ResizeObserver(() => this.syncMount());
+    this.ro = new ResizeObserver(() => {
+      this.rowH = 0;          // 尺寸变了，行高要重新量
+      this.syncMount();
+    });
     this.ro.observe(root);
     root.addEventListener('scroll', () => {
       if (this.scrollRaf) return;
@@ -106,25 +109,50 @@ export class GridView {
     });
   }
 
-  /** 按滚动位置挂载/卸载图表：视野上下各多留一行，滚动时不至于白屏 */
-  syncMount() {
+  /**
+   * 按滚动位置挂载/卸载图表：视野上下各多留一行，滚动时不至于白屏。
+   *
+   * 行高必须缓存：`cell.el.offsetHeight` 是同步读，每帧读一次就等于
+   * 每次滚动都强制浏览器把 400 个格子的 grid 重新布局一遍（实测长墙滚动
+   * 中位 300ms/帧就是它 + 挂载卸载一起造成的）。
+   */
+  syncMount(force) {
     const cells = this.cells;
     if (!cells.length) return;
     const cols = this.cols;
-    const h0 = cells[0].el.offsetHeight;
-    const rowH = (h0 > 20 ? h0 : 220) + 1;      // 首帧还没布局时用兜底值
+    if (force) this.rowH = 0;
+    if (!this.rowH) {
+      const h0 = cells[0].el.offsetHeight;
+      this.rowH = (h0 > 20 ? h0 : 220) + 1;      // 首帧还没布局时用兜底值
+    }
+    const rowH = this.rowH;
     const top = this.root.scrollTop;
     const h = this.root.clientHeight || 400;
     const firstRow = Math.max(0, Math.floor(top / rowH) - 2);
     const lastRow = Math.ceil((top + h) / rowH) + 2;
     const from = firstRow * cols;
-    const to = (lastRow + 1) * cols;
+    const to = Math.min(cells.length, lastRow * cols);
+
+    // 先卸掉不在窗口里的，腾出算力/请求额度
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
-      const want = i >= from && i < to;
-      if (want && !c.mounted) c.mount();
-      else if (!want && c.mounted) c.unmountChart();
+      if ((i < from || i >= to) && c.mounted) c.unmountChart();
     }
+    const visRowFrom = Math.floor((top + 1) / rowH);
+    const visRowTo = Math.ceil((top + h - 1) / rowH) - 1;
+    // 先挂**真正看得见**的那几行，再挂上下的缓冲行：
+    // 反过来挂的话，冷门区一屏 20 个请求会先喂给看不见的缓冲行，
+    // 用户盯着的格子反而排到最后（长墙滚动后一片「加载中」就是这个原因）
+    const want = [];
+    for (let i = from; i < to; i++) {
+      if (cells[i].mounted) continue;
+      const row = Math.floor(i / cols);
+      const d = row < visRowFrom ? visRowFrom - row
+        : (row > visRowTo ? row - visRowTo : 0);
+      want.push([d, i]);
+    }
+    want.sort((a, b) => a[0] - b[0]);
+    for (const [, i] of want) cells[i].mount();
   }
 
   /* ---------------- 选中 / 放大 ---------------- */

@@ -12,3 +12,6 @@ backup/
 *.tmp
 .DS_Store
 Thumbs.db
+
+# 截图（tools/shots.mjs 的产物）
+.shots/

@@ -22,8 +22,12 @@ const $ = (s) => document.querySelector(s);
 // 打包成 exe 后用户看不到 DevTools，白屏时只能靠服务端日志定位。
 // 服务端会对同一条错误做 5 分钟去重，这里再加一层总量上限，防止错误风暴。
 let errSent = 0;
+// 浏览器自己的噪音：ResizeObserver 的这条警告不影响任何功能
+// （图表容器每帧都在变尺寸，Chrome 就会抛），但它会把真正有用的错误挤出日志
+const NOISE = /ResizeObserver loop|Script error\.?$/;
 function reportError(msg, url, stack) {
   if (errSent > 40) return;
+  if (NOISE.test(String(msg || ''))) return;
   errSent++;
   try {
     fetch('/api/log', {
@@ -315,13 +319,29 @@ function syncSubs() {
     const wantBook = (big && big.isOpen())
       ? !!big.showDetail
       : (state.view === 'list' || !!state.detailOpen);
+    // 订阅要跟着**正在看的那张图**走。大图里左右键翻品种时 state.selected 会同步，
+    // 但 big.open() 也可能被别处直接调用（自选栏 / 扫描器 / E2E），
+    // 那时候 selected 还停在旧标的上，盘口流就订错了币，面板会一直是空的
+    const bookSym = (big && big.isOpen() && big.symbol) ? big.symbol : state.selected;
     api.sub({
       tickers: [...tickers],
       klines,
-      depth: wantBook ? state.selected : null,
-      trades: wantBook ? state.selected : null,
+      depth: wantBook ? bookSym : null,
+      trades: wantBook ? bookSym : null,
     });
   }, 180);
+}
+
+/* ------------------------------------------------------------------ 动画 */
+/** 元素淡入一次（只做 opacity/transform，不动布局；260ms 后回收类名）
+ *  不强制重排：这些元素都是从 display:none 切出来的，动画本来就会播；
+ *  为了「重播」去读 offsetWidth 反而要多付一次全量布局。 */
+function animateIn(el, cls = 'view-enter') {
+  if (!el || el.classList.contains('hidden')) return;
+  el.classList.remove(cls);
+  el.classList.add(cls);
+  clearTimeout(el._animTimer);
+  el._animTimer = setTimeout(() => el.classList.remove(cls), 260);
 }
 
 /* ------------------------------------------------------------------ 图表墙详情侧板 */
@@ -329,12 +349,14 @@ function setGridDetail(on) {
   state.detailOpen = !!on;
   save();
   const wrap = $('#grid-wrap');
+  const wasOn = wrap ? !wrap.classList.contains('dt-off') : false;
   if (wrap) wrap.classList.toggle('dt-off', !state.detailOpen);
   const sw = $('#grid-detail-switch');
   if (sw) sw.checked = state.detailOpen;
   if (state.detailOpen && grid && gridDetail) {
     const c = grid.cells[grid.focusIndex || 0];
     if (c && c.symbol) gridDetail.setSymbol(c.symbol);
+    if (!wasOn) animateIn($('#grid-detail'), 'dt-enter');
   }
   if (grid) grid.resize();
   syncSubs();
@@ -451,6 +473,7 @@ function switchView(view) {
   });
   $('#view-grid').classList.toggle('hidden', view !== 'grid');
   $('#view-list').classList.toggle('hidden', view !== 'list');
+  animateIn(view === 'grid' ? $('#view-grid') : $('#view-list'));
   setActiveSymbol(state.selected);
 
   if (view === 'list') {
@@ -599,7 +622,19 @@ async function boot() {
 
   // 行情快照先发出去。GridView 一构造就会给 8 个格子发 K 线请求，
   // 不抢先发的话 /api/market 会被挤到第 9 位，表头数字要等 1 秒才出来。
-  const marketReq = api.market();
+  // 桌面版现在会"先开窗口再等服务起来"，所以这里要能在服务还没监听时等一会儿。
+  const marketReq = (async () => {
+    let lastErr = null;
+    for (let i = 0; i < 16; i++) {
+      try {
+        return await api.market();
+      } catch (e) {
+        lastErr = e;
+        await new Promise((r) => setTimeout(r, 350));
+      }
+    }
+    throw lastErr;
+  })();
 
   grid = new GridView($('#grid'), {
     onCellsChanged: syncSubs,
@@ -760,7 +795,7 @@ async function boot() {
     if (big && big.isOpen()) big.onFrame(ALL);
   });
 
-  window.__term = { grid, list, detail, gridDetail, big, scanner, alerts, state, market };
+  window.__term = { grid, list, detail, gridDetail, big, scanner, alerts, state, market, syncSubs };
 
   setTimeout(() => {
     const sp = $('#splash');

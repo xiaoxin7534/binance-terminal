@@ -235,6 +235,8 @@ def fapi_get(path, timeout=25):
 
 _cache = {}
 _cache_lock = threading.Lock()
+_inflight_api = {}           # 同一个合约 REST path 只允许一个请求在飞（key -> Event）
+_inflight_api_lock = threading.Lock()
 LAST_USER_REQ = 0.0          # 最后一次浏览器请求的时间，预取靠它判断「用户现在忙不忙」
 _INTRADAY = {}               # 分时结果缓存（当天数据基本不变，只有最后一根在动）
 _intraday_lock = threading.Lock()
@@ -348,16 +350,42 @@ def http_get(path, timeout=25):
 
 
 def cached_fapi(path, ttl, timeout=25):
+    """合约 REST 缓存 + 同 key 去重。
+
+    合约接口单次 2~5 秒（走代理），而持仓量 / 多空比这类数据是
+    「打开大图后台预取一次、点开面板又要一次」——不去重就是两边同时打币安，
+    用户那次反而更慢（这个坑之前在 K 线预取上踩过一次）。
+    """
     key = "f:" + path
     now = time.time()
     with _cache_lock:
         hit = _cache.get(key)
         if hit and hit[0] > now:
             return hit[1]
-    body = fapi_get(path, timeout)
-    with _cache_lock:
-        _cache[key] = (now + ttl, body)
-    return body
+    with _inflight_api_lock:
+        ev = _inflight_api.get(key)
+        owner = ev is None
+        if owner:
+            ev = threading.Event()
+            _inflight_api[key] = ev
+    if not owner:
+        # 已经在飞的那次最多等一个超时；它失败了我们再自己拉
+        ev.wait(timeout)
+        with _cache_lock:
+            hit = _cache.get(key)
+        if hit:
+            return hit[1]
+    try:
+        body = fapi_get(path, timeout)
+        # 先落缓存再唤醒等待方，否则它们醒来还是 miss，又各拉一次
+        with _cache_lock:
+            _cache[key] = (time.time() + ttl, body)
+        return body
+    finally:
+        if owner:
+            with _inflight_api_lock:
+                _inflight_api.pop(key, None)
+            ev.set()
 
 
 def cached_get(path, ttl, timeout=25):
@@ -680,9 +708,9 @@ class Hub:
                 if sym.endswith("@f"):
                     continue        # 合约 K 线走 FuturesWorker，现货流不认 @f
                 s.add(sym.lower() + "@kline_" + iv)
-            # 合约 symbol 不能进现货流：btcusdt@f@depth20@100ms 是非法流名，
-            # 而且 /market/stream 本来也不提供 depth（实测只有 !ticker@arr 和 aggTrade），
-            # 永续盘口由前端按 4 秒轮询 REST 解决
+            # 合约 symbol 不能进现货流：btcusdt@f@depth20@100ms 是非法流名。
+            # 永续盘口走 DepthWorker（标准 /stream 端点的 @depth20@100ms），
+            # 现货盘口走这条流，两边都在服务端转成 {"t":"d"} 推给浏览器。
             if self.depth_symbol and not self.depth_symbol.endswith("@f"):
                 s.add(self.depth_symbol.lower() + "@depth20@100ms")
             if self.trade_symbol and not self.trade_symbol.endswith("@f"):
@@ -1874,8 +1902,10 @@ class Handler(BaseHTTPRequestHandler):
         if period not in ("5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"):
             period = "5m"
         limit = min(int((qs.get("limit") or ["500"])[0]), 500)
+        # 持仓量历史最小粒度也是 5m，缓存 2 分钟不会看到旧数据；
+        # 单次要走代理 3~5 秒，大图里切周期 / 反复开关持仓量全靠它挡
         raw = json.loads(cached_fapi(
-            "/futures/data/openInterestHist?symbol=%s&period=%s&limit=%d" % (sym, period, limit), 30, 30))
+            "/futures/data/openInterestHist?symbol=%s&period=%s&limit=%d" % (sym, period, limit), 120, 30))
         self._json({"h": [[int(x["timestamp"]), float(x["sumOpenInterest"]),
                            float(x["sumOpenInterestValue"])] for x in raw]})
 
@@ -1887,7 +1917,7 @@ class Handler(BaseHTTPRequestHandler):
             period = "5m"
         limit = min(int((qs.get("limit") or ["60"])[0]), 500)
         raw = json.loads(cached_fapi(
-            "/futures/data/globalLongShortAccountRatio?symbol=%s&period=%s&limit=%d" % (sym, period, limit), 30, 30))
+            "/futures/data/globalLongShortAccountRatio?symbol=%s&period=%s&limit=%d" % (sym, period, limit), 60, 30))
         self._json({"h": [[int(x["timestamp"]), float(x["longShortRatio"]),
                            float(x["longAccount"]) * 100] for x in raw]})
 
@@ -2188,6 +2218,11 @@ class Server(ThreadingHTTPServer):
 
 def build_server(host, port):
     """装配好后台线程和 HTTP 服务，返回未启动的 Server（桌面壳也用它）"""
+    # 先把端口绑上：桌面版会在这之后立刻开窗口，
+    # Chrome 启动的 ~1 秒正好和下面的初始化（读缓存、探测代理、拉起各条流）重叠。
+    # HTTPServer 的构造里已经 server_bind + listen，早到的连接会排队等 serve_forever。
+    srv = Server((host, port), Handler)
+
     load_sectors()
     load_listing()
     threading.Thread(target=load_klines, daemon=True).start()
@@ -2211,7 +2246,7 @@ def build_server(host, port):
     if SOCKS_PROXY:
         threading.Thread(target=funding_worker, daemon=True).start()
 
-    return Server((host, port), Handler)
+    return srv
 
 
 def main():

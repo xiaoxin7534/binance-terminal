@@ -23,8 +23,11 @@
 改完代码建议先跑一遍回归（服务要先开着）：
 
 ```bash
-node tools/e2e.mjs          # 19 个用例，约 90 秒
+node tools/e2e.mjs          # 24 个用例，约 2 分钟
 node tools/e2e.mjs bigchart # 只跑名字里带 bigchart 的
+node tools/perf.mjs         # 量耗时与流畅度：首屏 / 切周期 / 列表滚动 / 长任务
+node tools/startup.mjs      # 量桌面版启动：双击 exe → 端口可用 / 窗口 / 页面连上
+node tools/shots.mjs before # 改界面前后各截一套图，存到 .shots/
 ```
 
 项目有 git 版本控制，`git log` 能看到每轮改动的边界。
@@ -110,7 +113,9 @@ python server.py --open
   - 绘图按「品种 + 周期」分别保存（localStorage），刷新页面还在
 - **左右键直接翻上一个 / 下一个品种**（按当前筛选和排序）
 - 工具栏「盘口」：右侧挂一块盘口 + 合约数据栏，关掉后图表自动变宽
-- 工具栏「持仓量」：叠加 OI 曲线（独立窗格，仅永续）
+- 工具栏「持仓量」：叠加 OI 曲线（独立窗格，仅永续）。
+  打开永续大图后会在后台先把这个合约的持仓量历史取回来，点按钮基本是瞬间出图
+  （这个接口单次要 2~13 秒，以前是点了才开始拉，面板要空等好几秒）
 - `Esc` 或左上角返回箭头退出；从列表进来的就回到列表，从格子进来的就回到多品种同列
 
 > 图表用的是 **lightweight-charts**——TradingView 官方开源的那套，和 TradingView 网页版的

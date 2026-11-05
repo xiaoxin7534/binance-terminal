@@ -3,6 +3,7 @@
 import { api } from '../core/api.js';
 import { market, state, dpOf, isFav, toggleFav, sectorLabels } from '../core/store.js';
 import { openMenu } from '../core/picker.js';
+import { cachedKlines } from './cell.js';
 import {
   fmtPrice, fmtCompact, fmtPct, fmtQty, fmtFunding, dirClass, clockTime,
 } from '../core/fmt.js';
@@ -90,6 +91,7 @@ export class DetailPanel {
     this.trades = [];
     this.lastDepth = null;
     this.perp = null;
+    this.perpTries = 0;
     this.bookStep = 0;
     this.pendTimers.forEach(clearTimeout);
     this.pendTimers = [];
@@ -349,7 +351,13 @@ export class DetailPanel {
         if (!this.chart) return;
         const w = this.chartEl.clientWidth;
         const h = this.chartEl.clientHeight;
-        if (w > 10 && h > 10) this.chart.applyOptions({ width: w, height: h });
+        if (w > 10 && h > 10) {
+          this.chart.applyOptions({ width: w, height: h });
+          // 面板可能是在隐藏状态下建的（大图右侧栏）：那时宽高是 0，
+          // fitContent() 算出来的可视区间是空的，之后再改尺寸也不会自动重算，
+          // 表现就是「近 2 小时」一直是一块白板。尺寸一稳定就重排一次。
+          try { this.chart.timeScale().fitContent(); } catch (e) { /* ignore */ }
+        }
       });
     }
     this.ro.observe(this.chartEl);
@@ -357,6 +365,15 @@ export class DetailPanel {
 
   async loadSpark() {
     const sym = this.symbol;
+    // 格子 / 大图刚拉过这个币的 1m，先拿它铺上——迷你走势图只有 84px 高，
+    // 让用户盯着空白等 2~5 秒的接口毫无意义
+    const warm = cachedKlines(sym, '1m');
+    if (warm && warm.length) {
+      const rows = warm.slice(-120).map((b) => ({ time: Math.floor(b[0] / 1000), value: b[4] }));
+      this.area.setData(rows);
+      this.chart.timeScale().fitContent();
+      this.colorSpark();
+    }
     try {
       const res = await api.klines(sym, '1m', 120);
       if (sym !== this.symbol || !this.area) return;
@@ -557,6 +574,16 @@ export class DetailPanel {
       this.perp = d;
       this.renderPerp();
       this.tickCountdown();
+      // 有些字段拿不到时面板上就是一片 "--"，而轮询要等 20 秒。这里按缺口补两次：
+      //  - fr/mp：开服头几秒资金费率表还是空的；
+      //  - oi：/api/perp 里持仓量单独有个 4 秒超时，代理抖一下就没了。
+      const missing = d.fr == null || d.mp == null || d.oi == null;
+      if (missing && this.perpTries < 2) {
+        this.perpTries = (this.perpTries || 0) + 1;
+        setTimeout(() => {
+          if (sym === this.symbol) this.loadPerp(sym);
+        }, 2000 * this.perpTries);
+      }
     } catch (e) { /* 网络抖动忽略 */ }
   }
 
@@ -678,8 +705,8 @@ export class DetailPanel {
       const hgt = Math.max(3, Math.round(Math.pow(Math.abs(r) / max, 0.55) * 24));
       const d = new Date(t);
       const lb = `${d.getMonth() + 1}/${d.getDate()}`;
-      // 只在首尾标日期，中间留白，条形不会被文字挤乱
-      const show = i === 0 || i === hist.length - 1 ? lb : '';
+      // 只隔几个标一次日期：9 根全标会挤成一片，首尾 + 每三根最清楚
+      const show = i === 0 || i === hist.length - 1 || i % 3 === 0 ? lb : '';
       return `<div class="fh-col" title="${lb} ${p2(d.getHours())}:00 ${r.toFixed(4)}%">
         <div class="fh-bar"><i class="${r >= 0 ? 'up' : 'down'}" style="height:${hgt}px"></i></div>
         <span>${show}</span></div>`;

@@ -40,6 +40,82 @@ function rememberKlines(key, k) {
   }
 }
 
+/** 给详情面板的迷你走势图用：格子/大图刚拉过的数据先顶上，别让 84px 的框空等接口 */
+export function cachedKlines(sym, iv) {
+  const hit = KL_CACHE.get(sym + '|' + iv);
+  return hit && hit.k && hit.k.length ? hit.k : null;
+}
+
+/* 分帧改尺寸
+ *
+ * 侧板一开一合，8 张图要在同一帧里各重建一次 canvas —— 实测主线程一次卡 90~170ms，
+ * 肉眼就是"顿一下"。改成每帧最多干 8ms、剩下的下一帧接着做：
+ * 总耗时不变，但没有单帧长任务了。
+ */
+const resizeQueue = [];
+let resizeRaf = 0;
+
+function queueResize(cell) {
+  if (cell._resizeQueued || cell.disposed) return;
+  cell._resizeQueued = true;
+  resizeQueue.push(cell);
+  if (!resizeRaf) resizeRaf = requestAnimationFrame(flushResizes);
+}
+
+function flushResizes() {
+  resizeRaf = 0;
+  const t0 = performance.now();
+  while (resizeQueue.length) {
+    const cell = resizeQueue.shift();
+    cell._resizeQueued = false;
+    if (!cell.disposed && cell.chart) cell.applySize();
+    if (performance.now() - t0 > 8) break;
+  }
+  if (resizeQueue.length) resizeRaf = requestAnimationFrame(flushResizes);
+}
+
+/* K 线请求闸门
+ *
+ * 长墙滚到冷门区，一屏 20 个格子会同时 mount，各自发一个 K 线请求——
+ * 走代理时它们互相抢带宽，谁都好不了。限并发，其余排队。
+ * 取 8 是因为默认的 2×4 墙就是 8 格：首屏一次放完，不多等一轮；
+ * 长墙 20+ 格时才会真正起到限流作用。
+ *
+ * 排队里还要能"跳过已经不需要的"：滚过去又滚走、或者切了周期，
+ * 旧请求还占着队列的话，新位置就得等它跑完。
+ */
+const KLINE_CONCURRENCY = 8;
+const klineQueue = [];
+let klineActive = 0;
+
+/**
+ * 往队列里塞一个任务，然后尽可能多地启动。
+ * 注意：过期的任务只是 resolve(null) 让出位置，**不能**直接 return ——
+ * 那样队列就停在这一格上，后面的任务永远不会被捞起来
+ * （实测卡成 active:0 / queued:47，整面墙一直「加载中」）。
+ */
+function withKlineSlot(run, isStale) {
+  return new Promise((resolve, reject) => {
+    const go = () => {
+      if (isStale && isStale()) { resolve(null); return; }
+      klineActive++;
+      let p;
+      try { p = run(); } catch (e) { p = Promise.reject(e); }
+      p.then(resolve, reject).finally(() => { klineActive--; pump(); });
+    };
+    const pump = () => {
+      while (klineQueue.length && klineActive < KLINE_CONCURRENCY) klineQueue.shift()();
+    };
+    klineQueue.push(go);
+    pump();
+  });
+}
+
+// 调试用：控制台执行 __klineStats() 能看到在飞/排队数 —— 排查「长墙一直加载中」很有用
+if (typeof window !== 'undefined') {
+  window.__klineStats = () => ({ active: klineActive, queued: klineQueue.length });
+}
+
 const cv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 function themeColors() {
@@ -120,9 +196,9 @@ export class Cell {
       <div class="cell-body">
         <div class="chart-host" style="position:absolute;inset:0"></div>
         <div class="cell-legend" data-role="legend"></div>
-        <div class="cell-legend" data-role="mlegend"></div>
+        <div class="cell-legend macd" data-role="mlegend"></div>
         <div class="cell-err hidden"></div>
-        <div class="cell-loading hidden">加载中…</div>
+        <div class="cell-loading hidden">载入 K 线</div>
       </div>`;
 
     this.symBtn = this.el.querySelector('.cell-sym');
@@ -234,6 +310,8 @@ export class Cell {
     const ind = state.indicators;
     const W = Math.max(80, this.host.clientWidth || 320);
     const H = Math.max(80, this.host.clientHeight || 240);
+    this.lastW = this.host.clientWidth;
+    this.lastH = this.host.clientHeight;
 
     this.chart = LC.createChart(this.host, {
       width: W,
@@ -442,6 +520,20 @@ export class Cell {
     const W = this.host.clientWidth;
     const H = this.host.clientHeight;
     if (W < 10 || H < 10) return;
+    // 尺寸没变就别重建 canvas：一次布局里 ResizeObserver 可能连着触发两次
+    if (W === this.lastW && H === this.lastH) return;
+    this.lastW = W;
+    this.lastH = H;
+    this.pendingW = W;
+    this.pendingH = H;
+    queueResize(this);
+  }
+
+  /** 真正把新尺寸交给图表（由 queueResize 分帧调用） */
+  applySize() {
+    const W = this.pendingW;
+    const H = this.pendingH;
+    if (!this.chart || !W || !H) return;
     this.chart.applyOptions({ width: W, height: H });
     this.schedulePaneHeights();
     this.scheduleLegendLayout();
@@ -531,7 +623,17 @@ export class Cell {
       state.cells[this.index] = sym;
       save();
     }
-    this.symBtn.innerHTML = `${symLabel(sym)} <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>`;
+    // 格子里只显示基币，计价货币做成小字（窄格子直接隐藏）：
+    // 4×2 的墙上单格才 245px，BTCUSDT 这种 7 个字母太占地方
+    const full = symLabel(sym);
+    const m = /^(.+?)(USDT|USDC|FDUSD|BUSD|TUSD|BTC|ETH|BNB)$/.exec(full);
+    const base = m ? m[1] : full;
+    const quote = m ? m[2] : '';
+    this.symBtn.title = full;
+    this.symBtn.innerHTML = `<span class="cs-b">${base}</span>`
+      + (quote ? `<span class="cs-q">/${quote}</span>` : '')
+      + (sym.endsWith('@f') ? '<span class="cs-p">永</span>' : '')
+      + ' <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>';
     this.applyPriceFormat();
     this.renderHead();
     if (this.mounted) {
@@ -637,10 +739,14 @@ export class Cell {
       this.loadEl.classList.remove('hidden');
     }
     try {
-      const res = this.intraday
-        ? await api.intraday(this.symbol, this.interval === '5d' ? 5 : 1)
-        : await api.klines(this.symbol, this.interval, BAR_LIMIT);
-      if (id !== this.reqId) return;
+      const res = await withKlineSlot(
+        () => (this.intraday
+          ? api.intraday(this.symbol, this.interval === '5d' ? 5 : 1)
+          : api.klines(this.symbol, this.interval, BAR_LIMIT)),
+        // 排队期间被换掉/卸载了就别再发
+        () => id !== this.reqId || this.disposed,
+      );
+      if (!res || id !== this.reqId) return;
       this.errEl.classList.add('hidden');
       this.failCount = 0;
       if (this.loadEl) this.loadEl.classList.add('hidden');
@@ -773,8 +879,11 @@ export class Cell {
       // 数据不足的格子会左边留白，但至少和别的格子对得齐。
       const target = BAR_LIMIT;
       const spacing = Math.max(2.6, Math.min(14, paneW / (target + 2)));
+      // 右侧收边要留出半个刻度标签的宽度：rightOffset=1 时最后一根几乎贴住价格轴，
+      // 横轴最后一个 "17:00" 会被切掉半边，显示成 "17:0("。约 16px 刚好够。
+      const rightOffset = Math.max(1, Math.round(16 / spacing));
       try {
-        this.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 1 });
+        this.chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset });
         this.chart.timeScale().scrollToRealTime();
       } catch (e) { /* ignore */ }
       this.ready = true;
@@ -790,8 +899,11 @@ export class Cell {
     const id = this.reqId;
     this.loadingMore = true;
     try {
-      const res = await api.klines(this.symbol, this.interval, BAR_LIMIT, before);
-      if (id !== this.reqId || this.disposed || !this.chart) return;
+      const res = await withKlineSlot(
+        () => api.klines(this.symbol, this.interval, BAR_LIMIT, before),
+        () => id !== this.reqId || this.disposed,
+      );
+      if (!res || id !== this.reqId || this.disposed || !this.chart) return;
       const more = res.k || [];
       if (!more.length) {
         this.noMore = true;
@@ -1021,10 +1133,10 @@ export class Cell {
       const dea = this.ind.dea && this.ind.dea[i];
       const hist = this.ind.hist && this.ind.hist[i];
       this.mlegendEl.innerHTML =
-        `<span class="lg-macd">MACD(12,26,9)</span>` +
-        `<span class="lg-macd">DIF <b>${dif == null ? '--' : dif.toFixed(mdp)}</b></span>` +
-        `<span class="lg-macd">DEA <b>${dea == null ? '--' : dea.toFixed(mdp)}</b></span>` +
-        `<span class="lg-macd">MACD <b class="${dirClass(hist)}">${hist == null ? '--' : hist.toFixed(mdp)}</b></span>`;
+        `<span class="lg-macd lg-param">MACD 12,26,9</span>` +
+        `<span class="lg-macd lg-v">DIF <b>${dif == null ? '--' : dif.toFixed(mdp)}</b></span>` +
+        `<span class="lg-macd lg-v">DEA <b>${dea == null ? '--' : dea.toFixed(mdp)}</b></span>` +
+        `<span class="lg-macd lg-v">MACD <b class="${dirClass(hist)}">${hist == null ? '--' : hist.toFixed(mdp)}</b></span>`;
     }
   }
 

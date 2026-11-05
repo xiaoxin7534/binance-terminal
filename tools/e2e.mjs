@@ -334,6 +334,12 @@ test('列表：Enter 进大图', async (s) => {
 
 test('合约盘口：WebSocket 实时推送（不是 4 秒轮询）', async (s) => {
   const r = await s.ev(`
+    // 真人只会在列表可见时点行；大图开着的话盘口订阅跟着大图走（这是对的），
+    // 先把它关掉，否则这条用例测的就不是"点列表行"这件事了
+    if (window.__term.big && window.__term.big.isOpen()) {
+      window.__term.big.close();
+      await new Promise(r=>setTimeout(r,400));
+    }
     const rows = [...document.querySelectorAll('.tbody-inner .row')];
     const perp = rows.find(r => r.dataset.sym.endsWith('@f'));
     perp.click();
@@ -342,7 +348,14 @@ test('合约盘口：WebSocket 实时推送（不是 4 秒轮询）', async (s) 
     let n = 0;
     const ob = new MutationObserver(() => n++);
     ob.observe(book, { childList: true, subtree: true });
-    const s1 = await (await fetch('/api/status')).json();
+    // 代理抖动时 DepthWorker 会掉线重连，等它回到 ok 再采样。
+    // 这不是放宽标准：连不回来照样失败，只是别把"重连中"当成"没实现"。
+    let s1 = null;
+    for (let i = 0; i < 120; i++) {
+      s1 = await (await fetch('/api/status')).json();
+      if (s1.futdepth === 'ok' && s1.depth === perp.dataset.sym) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
     await new Promise(r=>setTimeout(r,3000));
     ob.disconnect();
     const s2 = await (await fetch('/api/status')).json();
@@ -440,8 +453,16 @@ test('大图：右侧盘口栏可开关', async (s) => {
     await new Promise(r=>setTimeout(r,3500));
     // 盘口栏现在默认打开，先确保它是开的
     if (!big.showDetail) document.querySelector('#bc-detail-btn').click();
-    await new Promise(r=>setTimeout(r,5000));
+    // 盘口是 WS 推的，要先按「当前大图在看哪个币」重新登记订阅
+    // （big.open() 直接被调用时不会走 openBig，订阅得自己补一发）
+    window.__term.syncSubs();
     const p = document.querySelector('#bc-detail');
+    // 轮询等盘口出档位：单次 REST 兜底在代理抖动时要好几秒，别写死等待时间
+    for (let i = 0; i < 300; i++) {
+      if (p.querySelectorAll('.book-row').length) break;
+      await new Promise(r=>setTimeout(r,50));
+    }
+    await new Promise(r=>setTimeout(r,300));
     const on = { visible: p.getClientRects().length > 0, rows: p.querySelectorAll('.book-row').length,
                  title: (p.querySelector('.dt-title h3')||{}).textContent,
                  chartW: Math.round(document.querySelector('#bigchart .cell').getBoundingClientRect().width) };
@@ -452,7 +473,7 @@ test('大图：右侧盘口栏可开关', async (s) => {
     return { on, off };
   `);
   assert(r.on.visible, '盘口栏没显示');
-  assert(r.on.rows > 0, '盘口没数据');
+  assert(r.on.rows > 0, '盘口没数据（等了 15 秒）');
   assert(r.off.visible === false, '盘口栏没关掉');
   assert(r.off.chartW > r.on.chartW, '关掉盘口栏后图表没变宽');
   await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,400)); return 1;`);
@@ -511,7 +532,12 @@ test('大图：持仓量叠加（pane 2）', async (s) => {
     big.open('BTCUSDT@f','1m');
     await new Promise(r=>setTimeout(r,3800));
     document.querySelector('#bc-oi-btn').click();
-    await new Promise(r=>setTimeout(r,4200));
+    // 持仓量历史要走代理，单次 2~5 秒（行情抖动时更久），
+    // 固定等 4 秒会偶发误报，这里改成轮询到数据到位为止
+    for (let i = 0; i < 300; i++) {
+      if (big.oiData && big.oiData.length > 10) break;
+      await new Promise(r=>setTimeout(r,50));
+    }
     const panes = big.cell.chart.panes().length;
     const rows = big.oiData ? big.oiData.length : 0;
     document.querySelector('#bc-oi-btn').click();
@@ -522,7 +548,7 @@ test('大图：持仓量叠加（pane 2）', async (s) => {
     return { panes, rows, after };
   `);
   assertEq(r.panes, 3, '开持仓量后应该有 3 个窗格');
-  assert(r.rows > 10, '持仓量数据太少：' + r.rows);
+  assert(r.rows > 10, '持仓量数据太少（等了 15 秒）：' + r.rows);
   assert(r.after < 3, '关掉持仓量后窗格没减少');
 });
 

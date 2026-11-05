@@ -622,6 +622,8 @@ export class BigChart {
     this.oiOn = false;
     this.oiSeries = null;
     this.oiData = null;
+    this.oiCache = null;        // { key: 'sym|period', rows } 后台预取的持仓量
+    this.oiPrefetchTimer = 0;
 
     this.body = root.querySelector('.bc-body');
     // 复位按钮挂在图表格子里，不能挂在 .bc-body —— 那里面还含右侧盘口栏，
@@ -646,6 +648,14 @@ export class BigChart {
 
   isOpen() {
     return !this.root.classList.contains('hidden');
+  }
+
+  /** 大图淡入一次（只动 opacity/transform，不触发图表 resize） */
+  playEnter() {
+    this.root.classList.remove('bc-enter');
+    this.root.classList.add('bc-enter');
+    clearTimeout(this.enterTimer);
+    this.enterTimer = setTimeout(() => this.root.classList.remove('bc-enter'), 280);
   }
 
   /* ---------------- 顶部栏 ---------------- */
@@ -739,6 +749,9 @@ export class BigChart {
       return;
     }
     const LC = window.LightweightCharts;
+    // 换品种 / 换周期时这条曲线是重建的，旧数据不能留着（否则预取回来会被
+    // 「已经有数据了」的判断挡住，白白多打一次接口）
+    this.oiData = null;
     try {
       this.oiSeries = chart.addSeries(LC.LineSeries, {
         color: '#8b5cf6',
@@ -771,15 +784,64 @@ export class BigChart {
   async loadOI() {
     const sym = this.symbol;
     if (!sym || !sym.endsWith('@f') || !this.oiSeries) return;
-    const period = ['time', '1m', '5m'].includes(this.interval) ? '5m' : this.interval;
+    const period = this.oiPeriod();
+    const key = sym + '|' + period;
+    const btn = this.root.querySelector('#bc-oi-btn');
+    // 打开大图时后台已经拉过了，点开就是 0ms
+    if (this.oiCache && this.oiCache.key === key && this.oiCache.rows.length) {
+      this.applyOIRows(this.oiCache.rows);
+      return;
+    }
+    if (btn) { btn.classList.add('loading'); btn.title = '持仓量加载中…'; }
     try {
       const d = await api.oihist(sym, period, 500);
       if (sym !== this.symbol || !this.oiSeries) return;
       const rows = (d.h || []).map(([t, oi]) => ({ time: Math.floor(t / 1000), value: oi }));
-      this.oiData = rows;
-      this.oiSeries.setData(rows);
-      this.sizeOIPane();
-    } catch (e) { /* 网络抖动忽略 */ }
+      this.oiCache = { key, rows };
+      this.applyOIRows(rows);
+    } catch (e) { /* 网络抖动忽略 */ } finally {
+      if (btn) { btn.classList.remove('loading'); btn.title = '持仓量'; }
+    }
+  }
+
+  applyOIRows(rows) {
+    if (!this.oiSeries) return;
+    this.oiData = rows;
+    this.oiSeries.setData(rows);
+    this.sizeOIPane();
+  }
+
+  /** 持仓量历史用哪个周期（分时图没 5m，统一按 5m 拉） */
+  oiPeriod() {
+    return ['time', '1m', '5m'].includes(this.interval) ? '5m' : this.interval;
+  }
+
+  /**
+   * 打开永续大图后，后台先把持仓量历史拿回来。
+   * 延后 2 秒：K 线 / 盘口 / 合约数据正在抢那条代理连接，
+   * 预取这时候插进来只会让首屏更慢（K 线预取踩过这个坑）。
+   */
+  scheduleOIPrefetch() {
+    clearTimeout(this.oiPrefetchTimer);
+    this.oiPrefetchTimer = 0;
+    const sym = this.symbol;
+    if (!sym || !sym.endsWith('@f')) return;
+    const iv = this.interval;
+    const period = this.oiPeriod();
+    const key = sym + '|' + period;
+    if (this.oiCache && this.oiCache.key === key) return;
+    this.oiPrefetchTimer = setTimeout(() => {
+      this.oiPrefetchTimer = 0;
+      if (this.symbol !== sym || this.interval !== iv) return;
+      if (this.oiCache && this.oiCache.key === key) return;
+      api.oihist(sym, period, 500).then((d) => {
+        if (this.symbol !== sym || this.interval !== iv) return;
+        const rows = (d.h || []).map(([t, oi]) => ({ time: Math.floor(t / 1000), value: oi }));
+        this.oiCache = { key, rows };
+        // 用户手快，已经点上「持仓量」并且在等数据了
+        if (this.oiOn && this.oiSeries && (!this.oiData || !this.oiData.length)) this.applyOIRows(rows);
+      }).catch(() => { /* 预取失败无所谓，点的时候还会再拉一次 */ });
+    }, 2000);
   }
 
   /** 右侧盘口栏（复用列表页那块 DetailPanel） */
@@ -821,6 +883,7 @@ export class BigChart {
     if (this.draw) this.draw.setKey(this.drawKey());
     this.hoverIdx = -1;
     this.showInfo(this.cell.times.length - 1);
+    this.scheduleOIPrefetch();
   }
 
   syncIv() {
@@ -837,11 +900,13 @@ export class BigChart {
   open(sym, iv) {
     if (!sym) return;
     const same = this.isOpen() && this.symbol === sym && this.interval === (iv || this.interval);
+    const wasOpen = this.isOpen();
     this.symbol = sym;
     if (iv && IVS.includes(iv)) this.interval = iv;
 
     this.root.classList.remove('hidden');
     document.body.classList.add('bc-open');
+    if (!wasOpen) this.playEnter();
 
     if (same && this.cell) {
       this.syncBar();
@@ -851,12 +916,15 @@ export class BigChart {
     this.syncBar();
     if (this.showDetail) this.detailPanel.setSymbol(this.symbol);
     if (this.oiOn) this.applyOI();
+    this.scheduleOIPrefetch();
   }
 
   close() {
     if (!this.isOpen()) return;
     this.root.classList.add('hidden');
     document.body.classList.remove('bc-open');
+    clearTimeout(this.oiPrefetchTimer);
+    this.oiPrefetchTimer = 0;
     this.destroyCell();
     this.detailPanel.renderEmpty();
     if (this.ctx.onClose) this.ctx.onClose();
@@ -1044,6 +1112,9 @@ export class BigChart {
   applyTheme() {
     if (this.cell) this.cell.applyTheme();
     if (this.draw) this.draw.schedule();
+    // 右侧详情栏是独立的 DetailPanel（自己持有一张轻量图表），
+    // 不转发给它的话，换主题后那块迷你走势图还停在旧底色（浅色主题里一块黑）
+    if (this.detailPanel) this.detailPanel.applyTheme();
   }
 
   /** 在当前筛选结果里前后翻一个品种（左右键） */

@@ -142,16 +142,36 @@ def run():
         return
 
     import server                       # 延迟导入，保证日志先接好
-    srv = server.build_server(HOST, PORT)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    print("服务已启动 %s" % url)
 
-    for _ in range(80):
-        if alive(status):
-            break
-        time.sleep(0.2)
+    # 服务启动和窗口启动并行：build_server 一开始就把端口绑上，
+    # 所以 Chrome 可以立刻开，它启动的 ~1 秒正好和"读缓存 + 探代理 + 拉起行情流"重叠。
+    # 前端首屏请求自带重试（app.js 的 marketReq），理论上服务慢一点也不会白屏。
+    box = {}
+    ready = threading.Event()
+
+    def boot():
+        try:
+            srv = server.build_server(HOST, PORT)
+        except Exception as e:          # noqa: BLE001
+            print("服务启动失败: %s" % e)
+            ready.set()
+            return
+        box["srv"] = srv
+        ready.set()
+        srv.serve_forever()
+
+    threading.Thread(target=boot, daemon=True).start()
 
     proc = open_window(url)
+    ready.wait(15)
+    if "srv" not in box:
+        print("服务没起来，窗口里会显示连接失败")
+    else:
+        for _ in range(80):
+            if alive(status):
+                break
+            time.sleep(0.2)
+        print("服务已启动: %s" % url)
     if proc is None:
         # 没有可等待的窗口进程，就常驻后台（用任务管理器结束）
         print("无窗口进程可等待，服务常驻")

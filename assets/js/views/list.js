@@ -476,8 +476,14 @@ export class ListView {
     const h = this.scroller.clientHeight || 400;
     const start = Math.max(0, Math.floor(st / ROW_H) - BUF);
     const end = Math.min(this.rows.length, Math.ceil((st + h) / ROW_H) + BUF);
-    if (!force && start === this.range[0] && end === this.range[1]) return;
-    this.range = [start, end];
+    // 已经渲染的窗口还盖得住新的可视区，就不重建。
+    // 重建一次 = 几十行 DOM + 每行重算列宽，这是列表滚动掉帧的主要来源。
+    if (!force && start >= this.range[0] && end <= this.range[1]) return;
+    // 多渲染 PAD 行余量：不这样的话下一帧 end 就越界，等于每帧都重建
+    const PAD = 4;
+    const rStart = Math.max(0, start - PAD);
+    const rEnd = Math.min(this.rows.length, end + PAD);
+    this.range = [rStart, rEnd];
 
     this.pool.clear();
     if (!this.rows.length) {
@@ -487,8 +493,10 @@ export class ListView {
       return;
     }
     const frag = document.createDocumentFragment();
-    for (let i = start; i < end; i++) {
-      frag.appendChild(this.makeRow(this.rows[i], i));
+    // 列宽一次算好给所有行用，别每行算一遍
+    const cols = fitCols(orderedCols(), this.colWidth);
+    for (let i = rStart; i < rEnd; i++) {
+      frag.appendChild(this.makeRow(this.rows[i], i, cols));
     }
     this.inner.replaceChildren(frag);
   }
@@ -524,7 +532,7 @@ export class ListView {
     }
   }
 
-  makeRow(row, i) {
+  makeRow(row, i, cols) {
     const el = document.createElement('div');
     el.className = 'row' + (row.s === this.selected ? ' sel' : '');
     el.dataset.sym = row.s;
@@ -533,11 +541,11 @@ export class ListView {
     const cls = dirClass(row.chgp);
     const amp = row.o ? ((row.h - row.lo) / row.o) * 100 : 0;
 
-    const cols = fitCols(orderedCols(), this.colWidth);
-    el.innerHTML = cols.map((c) => this.cellHtml(c, row, dp, cls, amp)).join('');
+    const useCols = cols || fitCols(orderedCols(), this.colWidth);
+    el.innerHTML = useCols.map((c) => this.cellHtml(c, row, dp, cls, amp)).join('');
 
     const refs = { el, row };
-    cols.forEach((c, idx) => {
+    useCols.forEach((c, idx) => {
       const node = el.children[idx];
       if (!node || c.key === 's') return;
       refs[c.key] = c.key === 'chgp' ? node.querySelector('.pill') : node;
