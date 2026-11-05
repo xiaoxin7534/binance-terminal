@@ -1915,3 +1915,32 @@ PyInstaller onefile 把 Python 运行时、`index.html`、`assets/` 全塞进那
 
 - 通知只覆盖「本次运行期间新出现的 base」。页面关着的时候上新的，只能靠「新币上线」页签找。
 - `seen.json` 冷启动会收录全市场（约 900 个 base），30 秒攒一次写盘，不逐个写。
+
+---
+
+## 2026-11-05 22:12 · 交易功能的可行性结论（只记结论，没动代码）
+
+用户问「能不能做币安登录直接在终端交易」。**结论：技术可行，当前网络下不可行，已决定先不做。**
+
+实测（本机 SOCKS5 出口 `67.159.48.147` = **新加坡**，币安列为受限地区）：
+
+| 探测 | 结果 |
+|---|---|
+| `fapi.binance.com/fapi/v1/ping` | 451 restricted location |
+| `api.binance.com/api/v3/ping` | 451 |
+| `POST www.binance.com/fapi/v1/order`（假 key） | 451（不是 -2014，说明被地区层先拦了） |
+| `POST www.binance.com/fapi/v1/listenKey` | 401 `-2014 API-key format invalid`（可达） |
+| `GET www.binance.com/fapi/v1/account` | 404 HTML —— **www 网关根本没有这条路由**，不是地区问题 |
+| `www.binance.com/fapi/v1/time` | 200（公开行情，所以看盘一直能用） |
+
+要点：
+1. 行情能过是因为只用了 `www` 网关的公开路径；交易/账户必须走 `fapi.binance.com` / `api.binance.com`，
+   这两个域名在本机是 451。
+2. 换非受限地区节点**可能**能通，但 `www` 网关不代理账户接口，换完必须直接重测 `fapi.binance.com`。
+3. 账号归属地才是根本：账号本身属受限地区时硬换节点容易触发风控（限制提现 / 重新 KYC）。
+   这条风险不由我们承担，已明确告知用户。
+4. 将来真要做，顺序是：只读（key 只给读取权限）→ 交易（单独 key、二次确认、名义价值上限、
+   心跳断开自动禁下单）→ 密钥存 Windows 凭据管理器，绝不进 git / 不进 exe。
+5. 现在能用的替代：半自动下单（终端算参数 → 复制 → 网页确认提交），零密钥零风险。
+
+**别在没重测 `fapi.binance.com` 之前就动手写交易代码** —— 写了也验证不了。
