@@ -1,7 +1,19 @@
 # 项目交接文档 · 币安本地看盘终端
 
 > 这份文档写给"下一个接手的人（或 AI）"，读完应该能立刻上手改代码。
-> 最后更新：2026-11-05 16:05
+> 最后更新：2026-11-05 18:15
+
+**远程仓库**：https://github.com/xiaoxin7534/binance-terminal （私有，默认分支 `main`）
+
+推送注意：本机直连 `github.com` 被阻断（`api.github.com` 反而直连可用），
+git 推送要挂本机 SOCKS 代理，仓库里已经配好：
+
+```bash
+git config http.https://github.com.proxy socks5h://127.0.0.1:10808
+```
+
+认证没有常驻凭据（本机没有 gh / GCM / SSH key），
+推之前要么用 PAT 内联 URL，要么先配 SSH key。
 
 ---
 
