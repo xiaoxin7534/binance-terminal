@@ -100,8 +100,8 @@ node tools/shots.mjs before # 改界面前后各截一套图，存到 .shots/
 
 ### 网络
 
-- **现货直连就能用，合约必须走代理**。币安对受限地区的合约接口返回 **451**，
-  这是服务端按地区拒绝，不是网络封锁——换域名、改 UA 都没用。
+- **现货直连就能用，合约需要代理**。币安的合约接口对部分地区返回 **451**
+  （API 层按地区限制，换域名、改 UA 都不会变），所以要靠代理访问合约域名。
 - 代理按这个顺序找：环境变量 `BINANCE_PROXY` → exe 同目录的 `proxy.txt`
   → 自动探测本机常见端口（`10808 / 1080 / 7890 / 7891 / 10809 / 2080 / 20171`）。
 - **没配代理也能用**，只是合约相关的数据（资金费率、持仓量、合约 K 线、永续扫描器）会是空的。
@@ -216,7 +216,7 @@ node tools/shots.mjs before # 改界面前后各截一套图，存到 .shots/
 
 > 图表用的是 **lightweight-charts**——TradingView 官方开源的那套，和 TradingView 网页版的
 > 视觉/交互同源。完整的 TradingView Charting Library 需要商业授权、官方 widget 又依赖外网 CDN，
-> 都塞不进这个「纯本地、受限地区可用、8MB 单文件」的 exe，所以绘图工具是自己叠一层 canvas 实现的。
+> 都塞不进这个「纯本地、不依赖 CDN、8MB 单文件」的 exe，所以绘图工具是自己叠一层 canvas 实现的。
 
 ### 1.6 永续扫描器 / 资金费率告警（工具栏）
 
@@ -295,20 +295,20 @@ node tools/shots.mjs before # 改界面前后各截一套图，存到 .shots/
 | 多空账户比 | `www.binance.com/futures/data/globalLongShortAccountRatio`（按需） |
 | 资金费率历史 | `www.binance.com/fapi/v1/fundingRate`（按需，缓存 5 分钟） |
 
-> **重要发现**：`fapi.binance.com` 在国内直连超时、走机场节点又返回 **451 受限地区**，
-> 但币安**网页版**用的是 `www.binance.com/fapi/...`（同一套 API 挂在 www 域名下），
-> 这个入口不受 451 影响。合约 WebSocket 也是同理——标准的 `/stream` 收不到数据，
-> 网页版用的 `/market/stream` 才行。所以合约数据全部走这两条通道。
+> **为什么合约 REST 走 www 域名**：`fapi.binance.com` 在部分网络下不可达，
+> 且该域名的合约接口对部分地区返回 **451**。币安网页版自己请求的是
+> `www.binance.com/fapi/...`——同一套 API 在 www 域名下也挂了一份，这条链路可用，
+> 所以合约 REST 全部走它。
 >
-> 但这条合约 WS 网关只挂了部分流：`!ticker@arr`、`@kline_*`、`@aggTrade` 都正常，
-> **注意区分两条合约 WS 入口**：`/market/stream` 有全市场 ticker 但没有 depth；
-> 标准 `/stream` 端点有 `@depth20@100ms`。永续盘口走后者，100ms 一帧实时推送，
-> 而不是像现货那样 100ms 推送。
+> **为什么合约 WS 用 `/market/stream`**：标准的 `/stream` 在这类网络下握手成功但收不到数据帧；
+> `/market/stream` 正常推送全市场 ticker。两者能力不同——`/market/stream` 有全市场 ticker
+> 但没有 depth，盘口要连标准 `/stream` 的 `@depth20@100ms`。
+> 所以永续是「行情走 `/market/stream`、盘口走 `/stream`」，都是 100ms 一帧。
 
-几个刻意的设计（都是为了在你这个网络环境下好用）：
+几个刻意的设计（都是为了网络条件一般时也能好用）：
 
 1. **不用浏览器直连币安**。浏览器 → 本地 Python → 币安。这样不受 CORS、代理、证书影响，
-   也不需要在浏览器里挂梯子。
+   也不需要在浏览器里做额外的网络配置。
 2. **REST 强制 gzip**。实测 500 根 1 分钟 K 线从 11.7 秒降到 1.7 秒，这是最关键的一条。
 2b. **K 线缓存**：下过的 K 线存内存 + 落盘，30 秒内直接复用；过期了也只补最近几根再合并。
    整墙 8 张图从「每次 3 秒」变成「回头再看 0.4 秒」。

@@ -5,7 +5,7 @@
 
 **远程仓库**：https://github.com/xiaoxin7534/binance-terminal （私有，默认分支 `main`）
 
-推送注意：本机直连 `github.com` 被阻断（`api.github.com` 反而直连可用），
+推送注意：本机直连 `github.com` 不通（`api.github.com` 反而直连可用），
 git 推送要挂本机 SOCKS 代理，仓库里已经配好：
 
 ```bash
@@ -89,7 +89,7 @@ git config http.https://github.com.proxy socks5h://127.0.0.1:10808
 
 | 地址 | 结果 |
 |---|---|
-| `fapi.binance.com/fapi/v1/klines` | **451 受限地区**（直连还 DNS 污染） |
+| `fapi.binance.com/fapi/v1/klines` | **451**（部分地区不可用） |
 | `www.binance.com/fapi/v1/klines` | **200 ✅** |
 
 同一套合约 API，币安在 www 域名下也挂了一份给网页版用，那条链路不检查地区。
@@ -104,13 +104,14 @@ git config http.https://github.com.proxy socks5h://127.0.0.1:10808
 
 **3. 现货必须走 `.vision` 域名**
 
-`api.binance.com` / `stream.binance.com` 在国内被 DNS 污染 + IP 封锁。
-币安给受限地区开了 `data-api.binance.vision` / `data-stream.binance.vision`，只提供现货行情。
+`api.binance.com` / `stream.binance.com` 在部分网络下不可达。
+币安另外开了 `data-api.binance.vision` / `data-stream.binance.vision`，只提供现货行情，
+本项目的现货数据全部走这两个域名。
 
 ### 代理
 
 合约接口必须走代理。`server.py` 的 `detect_proxy()` 自动探测本机 SOCKS5
-（10808/1080/7890/7891/10809/2080/20171），用户机器上是 **127.0.0.1:10808（v2rayN）**。
+（10808/1080/7890/7891/10809/2080/20171），本机是 `127.0.0.1:10808`。
 
 合约流量走代理、现货走直连——**不要把所有流量都塞进代理**，现货直连更快。
 
@@ -433,7 +434,7 @@ binance-terminal/
 
 **实测（预取完成后）**：首屏 **884ms**，从格子进大图 **8~10ms**。
 冷门合约（如 CRCLUSDT@f，排第 120 行不在预取范围）首次仍要 **2.7 秒**——
-那是代理 RTT，除非换更快的代理节点，否则消不掉。
+那是代理往返延迟，除非换更快的线路，否则消不掉。
 
 **已经排除的**：主线程不卡。静置 20 秒只有 1 个 60ms 长任务，切视图约 50ms，
 长墙滚动 16ms/帧。所以「不流畅」只可能是等网络，不是渲染。
@@ -669,56 +670,35 @@ B 48.3%  [====|====]  51.7% S
 
 实测：BTC 5 日 = 1171 根，11-01 00:00 → 11-05 01:30，首日开 77,622.01。
 
-### 三层封锁：DNS 污染 + SNI 阻断 + 451（2026-11-05 02:05 补）
+### 网络要求与端点选择（2026-11-05 整理）
 
-上一节只测了「域名能不能连」，这次往下挖了两层：
+这一节只记「哪些端点能用、为什么」，方便换网络或币安调整时快速定位。
 
-```
-1. DNS 层：fapi.binance.com → 108.160.166.61（Dropbox 的 IP，假地址）
-   阿里 DoH（dns.alidns.com）返回的也是这个假 IP —— 国内 DNS 服务商配合污染
-2. 走代理查 Cloudflare DoH 拿到真实 IP：18.164.154.88（AWS CloudFront）
-   用 curl --resolve 直连这个 IP → 0.197 秒就 000 失败
-   （不是超时，是连接被立即 RST —— TLS ClientHello 里的 SNI 被识别）
-3. 就算前两层过了，合约 API 还返回 451（服务端按地区拒绝）
-```
+**结论**：现货走 `.vision` 域名直连；合约走代理 + `www` 域名。
 
-**三层任何一层都过不去**，而且第三层是币安自己的策略，跟网络无关。
-
-`api.binance.me` 能连（现货 200）但合约 403，正好证明「同一 IP 下，币安按接口决定给不给」。
-
-**顺带验证的**：把币安 APP 的 UA（`binance-app/2.95.0` 等三种）换上去，
-403 依旧；`www.binance.me/bapi/...` 也是 403。所以不是 UA 或 header 的问题。
-
-### 合约能不能不靠代理？实测不能（2026-11-05 02:00）
-
-用户提出「币安手机 APP 在国内能直连，能不能用它的接口」。把常见域名全测了一遍
-（`curl --noproxy '*'` 强制直连）：
-
-| 域名 | 现货 `/api/v3/ping` | 合约 `/fapi/v1/ping` |
+| 用途 | 端点 | 备注 |
 |---|---|---|
-| `api.binance.com` / `api1~4` | 超时 | 超时 |
-| **`api.binance.me`** | **200 ✅** | **403** |
-| `fapi.binance.me` | — | 302 → `www.binance.me`（网页，403） |
-| `fapi.binance.com` / `fapi1~2` | — | 超时 |
-| `www.binance.com` | — | 超时 |
-| `data-api.binance.vision` | **200 ✅**（已在用） | — |
-| `data-fapi.binance.vision` / `fapi-data.binance.vision` | DNS 解析不了 | — |
+| 现货 REST | `data-api.binance.vision` | 公开行情域名 |
+| 现货 WS | `data-stream.binance.vision` | 同上 |
+| 合约 REST | `www.binance.com/fapi/...` | 经代理 |
+| 合约 WS（行情） | `fstream.binance.com/market/stream` | 经代理，有全市场 ticker |
+| 合约 WS（盘口） | `fstream.binance.com/stream` 的 `@depth20@100ms` | 经代理，`/market/stream` 没有 depth |
 
-**结论**：合约 API 没有可直连的公开入口。
+**为什么合约不用 `fapi.binance.com`**：该域名在部分网络下不可达；即便可达，
+合约接口也可能返回 **451**（币安按地区限制）。这是 API 层的行为，换 IP、换 UA
+都不改变结果。币安网页版自己请求的是 `www.binance.com/fapi/...`——同一套 API
+在 www 域名下也挂了一份，所以合约 REST 走这条。
 
-关键原因不是网络封锁，而是**服务端策略**——受限地区访问合约接口返回 **451**（法律原因不可用），
-这是 API 层的拒绝。网络能通也没用，换域名也没用，除非币安自己开新域名。
+**为什么合约 WS 用 `/market/stream`**：标准的 `/stream` 在该网络下握手成功但收不到数据帧，
+`/market/stream` 正常推送。两者能力不同，`/market/stream` 没有 depth，
+所以盘口要单独连标准 `/stream`。
 
-手机 APP 能直连，大概率是 APP 内置了非公开的加速线路（CDN / 专线），
-这些域名抓包才能拿到，靠猜猜不到。
+**`probe_fapi_direct()`**：启动时花最多 4 秒试 `fapi.binance.com` 直连，
+通了就设 `FAPI_DIRECT`，合约请求改走直连（延迟 2~4s → 200ms）。
+当前默认打「无法直连，继续走代理」，换网络环境或币安调整策略时会自动生效。
 
-**落地了两条防御性改动**：
-
-1. **`probe_fapi_direct()`**：每次启动花最多 4 秒试 `fapi.binance.com` 直连，
-   通了就设 `FAPI_DIRECT`，合约请求从此不走代理（延迟 2~4s → 200ms）。
-   现在打的是「无法直连，继续走代理」，但换个网络环境或币安改策略时会自动生效。
-2. **现货双域名**：`REST_HOST`（默认 `.vision`）+ `REST_HOST_ALT`（`.me`），
-   主域名失败自动切备用；`BINANCE_REST_HOST` 环境变量可覆盖。
+**现货双域名**：`REST_HOST`（默认 `.vision`）+ `REST_HOST_ALT`（`.me`），
+主域名失败自动切备用；`BINANCE_REST_HOST` 环境变量可覆盖。
 
 ### 盘口价格合并粒度（2026-11-05 01:45）
 
