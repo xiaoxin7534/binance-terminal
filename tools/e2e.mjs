@@ -577,12 +577,16 @@ test('5 日连续分时', async (s) => {
     await new Promise(r=>setTimeout(r,600));
     const c = window.__term.grid.cells[0];
     c.setInterval('5d');
-    for (let i = 0; i < 200; i++) {
-      if (c.times.length > 100) break;
+    // 冷启动时分两段并行拉 5 天 5m K 线，第一段先到、可视范围只有 2 天，
+    // 第二段到了才铺满 5 天。只等 times.length 会抢跑，要等到范围真的够宽。
+    let vr = null;
+    let spanDays = 0;
+    for (let i = 0; i < 120; i++) {
+      vr = c.chart ? c.chart.timeScale().getVisibleRange() : null;
+      spanDays = vr ? Math.round((vr.to - vr.from) / 86400) : 0;
+      if (spanDays >= 4 && c.times.length > 500) break;
       await new Promise(r => setTimeout(r, 100));
     }
-    const vr = c.chart ? c.chart.timeScale().getVisibleRange() : null;
-    const spanDays = vr ? Math.round((vr.to - vr.from) / 86400) : 0;
     return { bars: c.times.length, intraday: c.intraday, spanDays,
              legend: (c.legendEl || {}).textContent || '',
              has5dBtn: [...document.querySelectorAll('#interval-seg button')].some(b => b.dataset.iv === '5d') };
@@ -598,7 +602,7 @@ test('窗口缩放：工具栏按钮不被压扁', async (s) => {
   await s.ev(`document.querySelector('#tabs button[data-view="list"]').click(); return 1;`);
   await new Promise((r) => setTimeout(r, 800));
   const bad = [];
-  for (const w of [1600, 1366, 1200, 1024]) {
+  for (const w of [1600, 1440, 1366, 1280, 1200, 1024]) {
     await s.send('Emulation.setDeviceMetricsOverride', {
       width: w, height: 800, deviceScaleFactor: 1, mobile: false,
     });
@@ -748,6 +752,30 @@ test('股票市场细分：菜单与筛选', async (s) => {
     assert(!empty.text.includes('未就绪'), '把筛选空表误报成行情未就绪：' + empty.text);
   }
   assertEq(await s.ev('return window.__term.state.region;'), null, '用例结束没复位 region');
+});
+
+test('新品种通知：铃铛入口 + 页面内提示', async (s) => {
+  await s.ev(`document.querySelector('#tabs button[data-view="list"]').click(); await new Promise(r=>setTimeout(r,700)); return 1;`);
+  const bell = await s.ev(`
+    const b = document.querySelector('#list-bell-btn');
+    if (!b) return { exists: false };
+    const r = b.getBoundingClientRect();
+    return { exists: true, w: Math.round(r.width), h: Math.round(r.height), vis: r.width > 0 };
+  `);
+  assert(bell.exists, '工具栏里没有新币通知按钮');
+  assert(bell.vis, '新币通知按钮被隐藏了');
+  assert(bell.w > 20 && bell.w < 48, '铃铛按钮宽度异常：' + bell.w);
+
+  const r = await s.ev(`
+    window.__term.notifyNewListing({ b: 'TESTCOIN', s: 'TESTCOINUSDT', q: 'USDT', ts: Date.now() });
+    await new Promise(r=>setTimeout(r,400));
+    const t = document.querySelector('.toast');
+    return { text: t ? t.textContent : '', show: t ? t.classList.contains('show') : false,
+             act: !!(t && t.querySelector('.toast-act')) };
+  `);
+  assert(r.text.includes('TESTCOIN'), '没弹新品种提示：' + r.text);
+  assert(r.show, '提示条没显示');
+  assert(r.act, '提示条上没有「看大图」按钮');
 });
 
 test('行情条：单击选中 / 双击填格子 / 右键菜单', async (s) => {

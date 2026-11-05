@@ -587,11 +587,16 @@ def load_regions():
         log("股票市场细分载入失败: %s" % e)
     try:
         with open(SECTORS_LOCAL, "r", encoding="utf-8") as f:
-            delta = json.load(f).get("reg") or {}
+            local = json.load(f)
+        delta = local.get("reg") or {}
         if delta:
             REGIONS["map"].update(delta)
             _region_added.update(delta)
             log("叠加运行时股票市场 %d 个" % len(delta))
+        none = local.get("regn") or []
+        if none:
+            _region_none.update(none)
+            log("已确认无股票市场的标的 %d 个（商品/指数/外汇/Pre-IPO）" % len(none))
     except Exception:           # noqa: BLE001
         pass
 
@@ -654,7 +659,7 @@ _sector_pending = set()          # 已排队/正在查的 base，防重复
 _sector_lock = threading.Lock()
 _sector_bulk_at = 0.0            # 上次全量 exchangeInfo 的时间
 SECTOR_BULK_GAP = 6 * 3600       # 全量刷新最小间隔
-REGION_BULK_GAP = 10 * 60        # 只为补股票市场归属时的全量刷新间隔
+BULK_GAP_FAST = 10 * 60          # 快速通道：股票/商品类合约、补市场归属
 SECTOR_RETRY_GAP = 30 * 60       # 归不上类的 base 多久后重试
 SECTOR_MAX_TRY = 3               # 查不到标签的最多试几次就放弃
 _sector_fails = {}               # base -> 已尝试次数
@@ -665,6 +670,7 @@ _sector_pool = concurrent.futures.ThreadPoolExecutor(
 _sector_unknown_tags = {}        # 币安标签 -> 出现次数（映射表没覆盖的）
 _sector_added = {}               # 运行时补录的 base -> keys（只这些写盘）
 _region_added = {}               # 运行时补录的 base -> 股票市场（和上面同一份文件）
+_region_none = set()             # 查过 exchangeInfo 确认「没有股票市场」的（商品/指数/外汇/Pre-IPO）
 
 
 def load_sectors_local():
@@ -692,13 +698,41 @@ def save_sectors_local():
         os.makedirs(CACHE_DIR, exist_ok=True)
         tmp = SECTORS_LOCAL + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"v": 3, "map": _sector_added, "skip": sorted(_sector_skip),
-                       "reg": _region_added,
+            json.dump({"v": 4, "map": _sector_added, "skip": sorted(_sector_skip),
+                       "reg": _region_added, "regn": sorted(_region_none),
                        "ts": int(time.time())}, f,
                       ensure_ascii=False, separators=(",", ":"))
         os.replace(tmp, SECTORS_LOCAL)
     except Exception as e:      # noqa: BLE001
         log("归类结果写盘失败: %s" % e)
+
+
+def queue_unregioned():
+    """把「已有 TradFi 板块、却没有股票市场归属」的 base 排进归类队列。
+
+    升级兼容用：老版本没有 regions.json，那时归好类的股票现在缺市场标签，
+    而 note_new_symbol 只处理「完全没归类」的币，永远轮不到它们。
+    商品/指数/外汇/Pre-IPO 查过一次就记进 _region_none，下次开机不会再排。
+    """
+    n = 0
+    for base, keys in list(SECTORS["map"].items()):
+        if base in REGIONS["map"] or base in _region_none or base in _sector_skip:
+            continue
+        if not any(k in ("TRADFI", "PREIPO", "PREMARKET") for k in keys):
+            continue
+        with _sector_lock:
+            if base in _sector_pending:
+                continue
+            _sector_pending.add(base)
+        try:
+            _sector_q.put_nowait(base)
+            n += 1
+        except queue.Full:
+            with _sector_lock:
+                _sector_pending.discard(base)
+            break
+    if n:
+        log("补历史股票的市场归属：排队 %d 个" % n)
 
 
 def note_new_symbol(sym):
@@ -715,6 +749,89 @@ def note_new_symbol(sym):
     except queue.Full:
         with _sector_lock:
             _sector_pending.discard(base)
+
+
+# --------------------------------------------------------------------------
+# 新品种上线通知
+#
+# 判定口径：行情流里第一次见到这个 base，且不在「已见名单」里。
+# 已见名单落盘到 cache/seen.json —— 否则每次重启都会把全市场当成新币。
+# 进程刚起来的前 90 秒只收录不通知：冷启动时 tickers 缓存可能是空的，
+# 那一刻几千个币都算「第一次见到」，不设基线会一次性弹一堆通知。
+# --------------------------------------------------------------------------
+
+NEW_FILE = os.path.join(CACHE_DIR, "seen.json")
+NEW_GRACE = 90                   # 启动后多少秒内出现的只收录、不通知
+NEW_KEEP = 20                    # 内存里留最近多少条，供页面重连时补发
+
+NEW_SEEN = set()                 # 见过（或已通知过）的 base
+NEW_LIST = []                    # 最近发现的新品种 [{b,s,q,ts}]
+_new_lock = threading.Lock()
+_new_armed_at = 0.0
+_new_dirty = False
+
+
+def load_seen():
+    global _new_armed_at
+    try:
+        with open(NEW_FILE, "r", encoding="utf-8") as f:
+            NEW_SEEN.update(json.load(f).get("bases") or [])
+        log("载入已见品种 %d 个" % len(NEW_SEEN))
+    except FileNotFoundError:
+        log("没有 seen.json，首次启动的前 %d 秒只收录不通知" % NEW_GRACE)
+    except Exception as e:      # noqa: BLE001
+        log("已见品种载入失败: %s" % e)
+    _new_armed_at = time.time() + NEW_GRACE
+
+
+def save_seen():
+    global _new_dirty
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        tmp = NEW_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"v": 1, "bases": sorted(NEW_SEEN)}, f,
+                      ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp, NEW_FILE)
+        _new_dirty = False
+    except Exception as e:      # noqa: BLE001
+        log("已见品种写盘失败: %s" % e)
+
+
+def seen_saver():
+    """冷启动会一口气收录上千个 base，逐个写盘没必要，30 秒攒一次"""
+    while True:
+        time.sleep(30)
+        if _new_dirty:
+            save_seen()
+
+
+def note_new_listing(sym):
+    """行情流第一次见到某个 base → 判定是不是新品种，是就通知前端"""
+    global _new_dirty
+    base, quote = split_symbol(sym)
+    if not base or base in STABLE_BASES:
+        return
+    now = time.time()
+    with _new_lock:
+        if base in NEW_SEEN:
+            return
+        NEW_SEEN.add(base)
+        _new_dirty = True
+        if now < _new_armed_at:
+            return              # 启动基线，静默收录
+        item = {"b": base, "s": sym, "q": quote, "ts": int(now * 1000)}
+        NEW_LIST.append(item)
+        del NEW_LIST[:-NEW_KEEP]
+    # 新币在 LISTING 里还没有上架日期（要等后台探第一根 K 线），先按现在记一笔，
+    # 它就能立刻进「新币上线」页签；后台探到真实日期会覆盖掉
+    with _listing_lock:
+        LISTING.setdefault(base + "USDT", item["ts"])
+    log("新品种上线：%s（%s）" % (base, quote))
+    try:
+        HUB.broadcast({"t": "new", "d": [item]})
+    except Exception:           # noqa: BLE001
+        pass
 
 
 def _fetch_spot_tags(base):
@@ -797,21 +914,43 @@ def classify_bases(bases):
                    and any(k in ("TRADFI", "PREIPO", "PREMARKET") for k in got.get(b, []))]
     todo = list(dict.fromkeys(need_bulk + need_region))
 
+    bulk_checked = set()
     if todo:
         age = time.time() - _sector_bulk_at
-        # 补板块要等 6 小时（同一份 1.1MB 响应没必要反复拉）；
-        # 补股票市场只是顺手的事，新股票上市不该等 6 小时才进得了筛选，给 10 分钟
-        if age > SECTOR_BULK_GAP or (need_region and age > REGION_BULK_GAP):
+        # 补板块默认等 6 小时（同一份 1.1MB 响应没必要反复拉）。两种情况走快速通道：
+        #   1. 要补股票市场归属的（need_region）
+        #   2. 单币接口一条标签都查不到的（blind）—— 股票/商品类合约在现货里没有对应
+        #      交易对，`?symbol=XXXUSDT` 永远返回空，只能靠全量 exchangeInfo。
+        #      这类如果也等 6 小时，新股票上市当天就进不了筛选。
+        blind = [b for b in todo if b not in had_tags]
+        if age > SECTOR_BULK_GAP or ((need_region or blind) and age > BULK_GAP_FAST):
             bulk, regs = _fetch_futures_subtypes(todo)
+            bulk_checked = set(todo)
             _sector_bulk_at = time.time()
             for b, keys in bulk.items():
-                merged = set(got.get(b, [])) | set(keys)
-                got[b] = [k for k in SECTOR_ORDER if k in merged]
-            if regs:
+                merged = [k for k in SECTOR_ORDER
+                          if k in (set(got.get(b, [])) | set(keys))]
+                # 板块本来就是这个 → 不要重复播一次「新币已归类」
+                if merged == SECTORS["map"].get(b):
+                    got.pop(b, None)
+                else:
+                    got[b] = merged
+            # 全量里确实没有市场归属的（商品/指数/外汇/Pre-IPO）记下来，别每次开机再查一遍
+            marked = 0
+            for b in todo:
+                if b in regs or b in _region_none:
+                    continue
+                # 板块可能在 got 里（新币），也可能早就在 SECTORS 里（补历史）
+                keys_now = got.get(b) or SECTORS["map"].get(b) or []
+                if any(k in ("TRADFI", "PREIPO", "PREMARKET") for k in keys_now):
+                    _region_none.add(b)
+                    marked += 1
+            if regs or marked:
                 with _sector_lock:
                     REGIONS["map"].update(regs)
                     _region_added.update(regs)
                 save_sectors_local()
+            if regs:
                 log("补充股票市场归属 %d 个：%s" % (len(regs), "、".join(
                     "%s(%s)" % (b, "/".join(REGION_LABELS.get(k, k) for k in v))
                     for b, v in list(regs.items())[:4])))
@@ -844,7 +983,8 @@ def classify_bases(bases):
                 _sector_skip.add(b)
                 _sector_fails.pop(b, None)
                 dirty = True
-            else:
+            elif b in bulk_checked:
+                # 全量 exchangeInfo 真的查过了还是没有 → 才算一次失败
                 # 完全没标签（已下架的杠杆代币、只有币本位合约等），留到慢扫描再试；
                 # 试满 SECTOR_MAX_TRY 次放弃，否则每 30 分钟白查一次
                 n = _sector_fails.get(b, 0) + 1
@@ -1133,8 +1273,9 @@ class Hub:
             self.dirty.add(key)
             self.msg_count += 1
             self.last_ws_msg = time.time()
-        if is_new:                  # 新合约第一次出现 → 排队补板块分类
+        if is_new:                  # 新合约第一次出现 → 补板块分类 + 新品种通知
             note_new_symbol(key)
+            note_new_listing(key)
 
     # -- 涨速 ------------------------------------------------------------
     def speed(self, sym, price):
@@ -1176,8 +1317,9 @@ class Hub:
             self.dirty.add(sym)
             self.msg_count += 1
             self.last_ws_msg = now
-        if is_new:                  # 新币第一次出现 → 排队补板块分类
+        if is_new:                  # 新币第一次出现 → 补板块分类 + 新品种通知
             note_new_symbol(sym)
+            note_new_listing(sym)
 
 
 class Client:
@@ -2626,7 +2768,10 @@ def build_server(host, port):
 
     load_sectors()
     load_regions()
+    queue_unregioned()
     load_listing()
+    load_seen()
+    threading.Thread(target=seen_saver, daemon=True).start()
     threading.Thread(target=load_klines, daemon=True).start()
     threading.Thread(target=kline_saver, daemon=True).start()
     threading.Thread(target=kline_prefetch_worker, daemon=True).start()

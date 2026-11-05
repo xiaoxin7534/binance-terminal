@@ -607,6 +607,35 @@ function bindToolbar() {
 
   $('#list-detail-btn').addEventListener('click', () => setListDetail(!state.listDetailOpen));
 
+  // 新币上架通知：默认只弹页面内提示，开了这个才弹系统通知（需要浏览器授权）
+  const bell = $('#list-bell-btn');
+  if (bell) {
+    bell.classList.toggle('on', !!state.notify);
+    bell.addEventListener('click', async () => {
+      if (state.notify) {
+        state.notify = false;
+        save();
+        bell.classList.remove('on');
+        toast('已关闭系统通知');
+        return;
+      }
+      if (!('Notification' in window)) {
+        toast('这个浏览器不支持系统通知');
+        return;
+      }
+      let perm = Notification.permission;
+      if (perm === 'default') perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        toast('系统通知被拒绝，只保留页面内提示');
+        return;
+      }
+      state.notify = true;
+      save();
+      bell.classList.add('on');
+      toast('新品种上架时会弹系统通知');
+    });
+  }
+
   // 列表行高：三档预设，菜单里标出当前那档
   $('#list-rowh-btn').addEventListener('click', (e) => {
     const cur = String(state.rowH || 30);
@@ -632,6 +661,33 @@ function bindToolbar() {
 }
 
 /* ------------------------------------------------------------------ 启动 */
+/** 新品种上架：页面内提示 + 可选的系统通知
+ *  服务端只推一次，所以这里不再做去重；tag 用代码，同币多条会合并。 */
+let newRefreshTimer = 0;
+function notifyNewListing(it) {
+  if (!it || !it.b) return;
+  toast(`新品种上线：${it.b}`, {
+    label: '看大图',
+    onClick: () => openBig(it.s, state.interval),
+  });
+  if (state.notify && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      const n = new Notification(`新品种上线：${it.b}`, {
+        body: `${it.s} 刚上架，点这里看行情`,
+        tag: 'new-' + it.b,
+      });
+      n.onclick = () => {
+        window.focus();
+        openBig(it.s, state.interval);
+        n.close();
+      };
+    } catch (e) { /* 系统通知被拦（比如勿扰模式），页面内提示已经弹过了 */ }
+  }
+  // 一次上好几个时别连着拉几次快照
+  clearTimeout(newRefreshTimer);
+  newRefreshTimer = setTimeout(refreshMarket, 500);
+}
+
 /** 拉一次全量快照并重建列表（定时轮询和「新币归类」事件共用） */
 async function refreshMarket() {
   try {
@@ -807,6 +863,8 @@ async function boot() {
         }
         // 服务端给已归类的股票合约补上了市场归属：重拉快照即可（很少发生）
         case 'reg': refreshMarket(); break;
+        // 新品种上线：页面内提示 + （开了的话）系统通知
+        case 'new': (msg.d || []).forEach(notifyNewListing); break;
         default: break;
       }
     },
@@ -841,7 +899,10 @@ async function boot() {
     if (big && big.isOpen()) big.onFrame(ALL);
   });
 
-  window.__term = { grid, list, detail, gridDetail, big, scanner, alerts, state, market, syncSubs };
+  window.__term = {
+    grid, list, detail, gridDetail, big, scanner, alerts, state, market, syncSubs,
+    notifyNewListing,          // 调试/回归用：手动触发一次「新品种上线」
+  };
 
   setTimeout(() => {
     const sp = $('#splash');
