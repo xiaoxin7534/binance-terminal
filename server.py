@@ -21,6 +21,9 @@ import concurrent.futures
 import gzip
 
 from sector_rules import ORDER as SECTOR_ORDER, TAG_MAP, keys_from_tags, keys_from_futures
+from stock_map import (
+    REGION_LABELS, REGION_ORDER, NAMES as STOCK_NAMES, regions_of,
+)
 import http.client
 import queue
 import json
@@ -53,6 +56,7 @@ TICKER_CACHE = os.path.join(CACHE_DIR, "tickers.json")
 LISTING_CACHE = os.path.join(CACHE_DIR, "listing.json")
 KLINES_FILE = os.path.join(CACHE_DIR, "klines.json")
 SECTORS_FILE = os.path.join(ROOT, "assets", "data", "sectors.json")
+REGIONS_FILE = os.path.join(ROOT, "assets", "data", "regions.json")
 
 # 现货 REST：.vision 是币安给受限地区的公开行情域名，.me 是另一条不查地区的线路
 REST_HOST = os.environ.get("BINANCE_REST_HOST") or "data-api.binance.vision"
@@ -551,8 +555,66 @@ class WSConn:
 # --------------------------------------------------------------------------
 
 SECTORS = {"labels": {}, "map": {}}
+# 股票市场细分（美股/港股/A股/韩股/日股）：只覆盖 TradFi 里的股票类标的，
+# 加密币不在里面。结构和 SECTORS 一样，前端按数组包含来筛。
+REGIONS = {"labels": {}, "order": [], "map": {}, "names": {}}
 LISTING = {}
 _listing_lock = threading.Lock()
+
+
+def load_regions():
+    """载入股票市场细分表（assets/data/regions.json）
+
+    缺失不影响启动：没有这张表时前端只是不显示市场入口，
+    等新币归类线程拉到 exchangeInfo 会自动补上。
+    运行时补录的（新上的股票合约）叠在 cache/sectors.local.json 的 reg 字段里，
+    否则 exe 每次重启都要等下一次全量 exchangeInfo 才认得新股票。
+    """
+    global REGIONS
+    try:
+        with open(REGIONS_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        REGIONS = {
+            "labels": d.get("labels") or dict(REGION_LABELS),
+            "order": d.get("order") or list(REGION_ORDER),
+            "map": dict(d.get("map") or {}),
+            "names": dict(d.get("names") or {}),
+        }
+        log("载入股票市场细分 %d 个代码" % len(REGIONS["map"]))
+    except FileNotFoundError:
+        log("没有 regions.json，股票市场筛选暂不可用（跑 tools/build_regions.py 生成）")
+    except Exception as e:      # noqa: BLE001
+        log("股票市场细分载入失败: %s" % e)
+    try:
+        with open(SECTORS_LOCAL, "r", encoding="utf-8") as f:
+            delta = json.load(f).get("reg") or {}
+        if delta:
+            REGIONS["map"].update(delta)
+            _region_added.update(delta)
+            log("叠加运行时股票市场 %d 个" % len(delta))
+    except Exception:           # noqa: BLE001
+        pass
+
+
+def stock_name(base):
+    """代码 -> 名称（优先手工中文表，其次币安给的英文名）
+
+    现货 token 化股票是「原代码 + B」（NVDAB），合约是原代码（NVDA）。
+    两个方向都试一遍，永续和现货才能共用同一张表。
+    """
+    if not base:
+        return ""
+    alts = [base]
+    if base.endswith("B") and len(base) > 2:
+        alts.append(base[:-1])
+    else:
+        alts.append(base + "B")
+    for src in (STOCK_NAMES, REGIONS["names"]):
+        for k in alts:
+            nm = src.get(k)
+            if nm:
+                return nm
+    return ""
 
 
 def load_sectors():
@@ -592,6 +654,7 @@ _sector_pending = set()          # 已排队/正在查的 base，防重复
 _sector_lock = threading.Lock()
 _sector_bulk_at = 0.0            # 上次全量 exchangeInfo 的时间
 SECTOR_BULK_GAP = 6 * 3600       # 全量刷新最小间隔
+REGION_BULK_GAP = 10 * 60        # 只为补股票市场归属时的全量刷新间隔
 SECTOR_RETRY_GAP = 30 * 60       # 归不上类的 base 多久后重试
 SECTOR_MAX_TRY = 3               # 查不到标签的最多试几次就放弃
 _sector_fails = {}               # base -> 已尝试次数
@@ -601,6 +664,7 @@ _sector_pool = concurrent.futures.ThreadPoolExecutor(
     max_workers=6, thread_name_prefix="sector")
 _sector_unknown_tags = {}        # 币安标签 -> 出现次数（映射表没覆盖的）
 _sector_added = {}               # 运行时补录的 base -> keys（只这些写盘）
+_region_added = {}               # 运行时补录的 base -> 股票市场（和上面同一份文件）
 
 
 def load_sectors_local():
@@ -628,7 +692,8 @@ def save_sectors_local():
         os.makedirs(CACHE_DIR, exist_ok=True)
         tmp = SECTORS_LOCAL + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"v": 2, "map": _sector_added, "skip": sorted(_sector_skip),
+            json.dump({"v": 3, "map": _sector_added, "skip": sorted(_sector_skip),
+                       "reg": _region_added,
                        "ts": int(time.time())}, f,
                       ensure_ascii=False, separators=(",", ":"))
         os.replace(tmp, SECTORS_LOCAL)
@@ -672,8 +737,12 @@ def _fetch_spot_tags(base):
 
 
 def _fetch_futures_subtypes(bases):
-    """全量 exchangeInfo（约 1.1MB），只取需要的 base。"""
-    out = {}
+    """全量 exchangeInfo（约 1.1MB），只取需要的 base。
+
+    返回 (板块, 股票市场)：{base: [sector key]}、{base: [region key]}。
+    股票市场顺带一起取——同一个响应里就有 underlyingType，不额外发请求。
+    """
+    out, reg = {}, {}
     try:
         raw = json.loads(fapi_get("/fapi/v1/exchangeInfo", 40))
         want = set(bases)
@@ -681,12 +750,16 @@ def _fetch_futures_subtypes(bases):
             b = s.get("baseAsset")
             if b not in want:
                 continue
-            keys = keys_from_futures(s.get("underlyingSubType"), s.get("underlyingType"))
+            ut = s.get("underlyingType")
+            keys = keys_from_futures(s.get("underlyingSubType"), ut)
             if keys:
                 out.setdefault(b, set()).update(keys)
+            r = regions_of(b, ut)
+            if r:
+                reg[b] = r
     except Exception as e:      # noqa: BLE001
         log("拉 exchangeInfo 失败: %s" % e)
-    return {b: [k for k in SECTOR_ORDER if k in v] for b, v in out.items()}
+    return ({b: [k for k in SECTOR_ORDER if k in v] for b, v in out.items()}, reg)
 
 
 def classify_bases(bases):
@@ -717,12 +790,35 @@ def classify_bases(bases):
             if t not in TAG_MAP:
                 _sector_unknown_tags[t] = _sector_unknown_tags.get(t, 0) + 1
 
-    if need_bulk and time.time() - _sector_bulk_at > SECTOR_BULK_GAP:
-        bulk = _fetch_futures_subtypes(need_bulk)
-        _sector_bulk_at = time.time()
-        for b, keys in bulk.items():
-            merged = set(got.get(b, [])) | set(keys)
-            got[b] = [k for k in SECTOR_ORDER if k in merged]
+    # 已经判成 TradFi 但还没有股票市场归属的，也要进全量检查。
+    # 新上的股票合约走的是这条路：板块能从现货标签拿到，市场只有 exchangeInfo 有。
+    need_region = [b for b in bases
+                   if b not in REGIONS["map"]
+                   and any(k in ("TRADFI", "PREIPO", "PREMARKET") for k in got.get(b, []))]
+    todo = list(dict.fromkeys(need_bulk + need_region))
+
+    if todo:
+        age = time.time() - _sector_bulk_at
+        # 补板块要等 6 小时（同一份 1.1MB 响应没必要反复拉）；
+        # 补股票市场只是顺手的事，新股票上市不该等 6 小时才进得了筛选，给 10 分钟
+        if age > SECTOR_BULK_GAP or (need_region and age > REGION_BULK_GAP):
+            bulk, regs = _fetch_futures_subtypes(todo)
+            _sector_bulk_at = time.time()
+            for b, keys in bulk.items():
+                merged = set(got.get(b, [])) | set(keys)
+                got[b] = [k for k in SECTOR_ORDER if k in merged]
+            if regs:
+                with _sector_lock:
+                    REGIONS["map"].update(regs)
+                    _region_added.update(regs)
+                save_sectors_local()
+                log("补充股票市场归属 %d 个：%s" % (len(regs), "、".join(
+                    "%s(%s)" % (b, "/".join(REGION_LABELS.get(k, k) for k in v))
+                    for b, v in list(regs.items())[:4])))
+                try:
+                    HUB.broadcast({"t": "reg", "d": regs})
+                except Exception:       # noqa: BLE001
+                    pass
 
     if got:
         with _sector_lock:
@@ -2153,6 +2249,8 @@ class Handler(BaseHTTPRequestHandler):
             if not base or base in STABLE_BASES:
                 continue
             sec = SECTORS["map"].get(base, [])
+            # 股票市场细分：加密币一律空数组，前端只对非空的行显示
+            reg = REGIONS["map"].get(base) or REGIONS["map"].get(base[:-1]) or []
             # 上架时间按现货 symbol 存，永续取同一个 base 的现货日期
             ln_key = sym[:-2] if perp else sym
             row = {
@@ -2164,8 +2262,11 @@ class Handler(BaseHTTPRequestHandler):
                 "v": t["v"], "qv": t["qv"],
                 "wavg": (t["qv"] / t["v"]) if t["v"] else t["l"],
                 "sec": sec,
+                "reg": reg,
                 "ln": LISTING.get(ln_key),
             }
+            if reg:
+                row["nm"] = stock_name(base)
             if perp:
                 f = fund_snap.get(sym[:-2])
                 if f:
@@ -2179,7 +2280,8 @@ class Handler(BaseHTTPRequestHandler):
             rows.append(row)
         rows.sort(key=lambda r: -r["qv"])
         self._json({"ts": int(time.time() * 1000), "rows": rows,
-                    "labels": SECTORS["labels"]})
+                    "labels": SECTORS["labels"],
+                    "regions": {"labels": REGIONS["labels"], "order": REGIONS["order"]}})
 
     def api_klines(self, qs):
         sym = (qs.get("symbol") or ["BTCUSDT"])[0]
@@ -2523,6 +2625,7 @@ def build_server(host, port):
     srv = Server((host, port), Handler)
 
     load_sectors()
+    load_regions()
     load_listing()
     threading.Thread(target=load_klines, daemon=True).start()
     threading.Thread(target=kline_saver, daemon=True).start()

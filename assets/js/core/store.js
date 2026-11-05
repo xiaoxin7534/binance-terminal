@@ -32,6 +32,7 @@ const DEFAULTS = {
   mkt: 'all',          // 最大分类：all / spot / perp
   tab: 'all',
   sector: null,
+  region: null,        // 股票市场细分：US / HK / CN / KR / JP，null = 不限
   gridSector: 'all',
   colOrder: null,
   search: '',
@@ -87,6 +88,7 @@ export function save() {
         sync: state.sync, cells: state.cells, favs: state.favs,
         detailOpen: state.detailOpen,
         selected: state.selected, mkt: state.mkt, tab: state.tab, sector: state.sector,
+        region: state.region,
         gridSector: state.gridSector, colOrder: state.colOrder, sort: state.sort,
         alert: state.alert, uiV: 3,
         listDetailOpen: state.listDetailOpen, detailWidth: state.detailWidth,
@@ -211,6 +213,13 @@ export function matchMkt(row, mkt) {
   return (row.mkt || 'spot') === mkt;
 }
 
+/** 股票市场细分（美股/港股/A股/韩股/日股）。和板块标签一样是「包含」语义，
+ *  一个标的可能同时属于两个市场（比如 A+H 两地上市）。 */
+export function matchRegion(row, region) {
+  if (!region) return true;
+  return (row.reg || []).includes(region);
+}
+
 export function dpOf(sym) {
   const r = market.get(sym);
   if (!r) return 2;
@@ -225,6 +234,15 @@ export function rowOf(sym) {
 export let sectorLabels = {};
 export function setSectorLabels(labels) {
   if (labels && Object.keys(labels).length) sectorLabels = labels;
+}
+
+/* 股票市场细分标签与顺序（由服务端下发） */
+export let regionLabels = {};
+export let regionOrder = ['US', 'HK', 'CN', 'KR', 'JP'];
+export function setRegionLabels(meta) {
+  if (!meta) return;
+  if (meta.labels && Object.keys(meta.labels).length) regionLabels = meta.labels;
+  if (Array.isArray(meta.order) && meta.order.length) regionOrder = meta.order;
 }
 
 export function isFav(sym) {

@@ -260,6 +260,13 @@ node tools/shots.mjs before # 改界面前后各截一套图，存到 .shots/
   —— 现货和永续彻底分开，切到永续后板块数量也只算永续的
 - **板块筛选**：AI、Layer-1、Layer-2、RWA、Gaming、Meme、基础服务、DeFi、元宇宙、TradFi、Chinese，
   每个后面带数量（按当前大类统计），和页签可以叠加使用
+- **股票市场细分**：TradFi 里的股票类合约再按「标的归属市场」分成
+  **美股 / 港股 / A股 / 韩股 / 日股**（工具栏右侧「股票市场」下拉，每项带个数和平均涨跌幅）。
+  和页签、板块都能叠加：选「港股」就只剩港股映射的合约，选「A股」能看到中际旭创、宇树科技这些
+- 股票类合约在列表第二行直接显示公司名（`ZHONGJI` → 中际旭创 · 永续），
+  其余币种仍是「USDT 永续」
+
+![股票市场细分：选「港股」后只剩港股映射的合约](docs/stock-markets.png)
 - **列可拖动排序**：按住表头任意一列拖到别的位置，顺序会记在本地；
   默认 12 列，含 **涨速（1 分钟）** 和 **资金费率（仅永续行有值）**
 - 虚拟滚动，一千行也不卡
@@ -287,6 +294,20 @@ node tools/shots.mjs before # 改界面前后各截一套图，存到 .shots/
 > 点进去会显示「该分类暂无标的」。等币安上了新品种，往 `sectors.json` 里加一行就行。
 >
 > **关于 Chinese**：指中概股代币（阿里巴巴 BABAB）和中文社区热门币（币安人生、牛来）。
+>
+> **股票市场是怎么分的**：主口径是币安合约 `exchangeInfo` 里的 `underlyingType`
+> （`EQUITY` / `HK_EQUITY` / `KR_EQUITY` / `CN_EQUITY`），也就是**挂牌地**，不是猜的。
+> 只做两类修正：
+> 1. 币安标错的改判 —— 中际旭创（300308，创业板）、兆易创新（603986，沪市主板）都是纯 A 股公司、
+>    没有 H 股，币安把中国股票统一塞进了 `HK_EQUITY`，这里改回 A股；
+> 2. 币安没有的分类用 ADR / ETF 补 —— 日股至今没有对应的 `underlyingType`，
+>    索尼（`SONY`，ADR）和 `EWJ`（日本 ETF）靠 `stock_map.py` 里的人工表补进日股。
+>
+> 现货的 token 化股票（代码是「原代码 + B」，如 `NVDAB`）会去掉尾字母 B 回查合约表，
+> 查不到的一律按美股算。一个标的可以同时属于两个市场（索尼既在美股时段交易、又是日本公司），
+> 筛选是「包含」语义，所以各市场数量加起来会大于总数。
+> 表在 `assets/data/regions.json`，重建：`python tools/build_regions.py`；
+> 查单个代码的完整链路：`python tools/check_sectors.py ZHONGJI`。
 
 ### 快捷键
 
@@ -364,12 +385,16 @@ binance-terminal/
 ├── docs/                 README 用的界面截图
 ├── tools/make_icon.py    纯标准库画图标
 ├── tools/build_sectors.py 从币安官方数据重建板块分类
+├── tools/build_regions.py 从币安官方数据重建股票市场细分（美股/港股/A股/韩股/日股）
 ├── 启动看盘.bat          开发版启动脚本
 ├── server.py             本地服务：静态文件 + 币安代理 + WebSocket 中继(SSE)
+├── sector_rules.py       板块规则表（币安标签 -> 板块）
+├── stock_map.py          股票市场规则表（挂牌地 -> 市场 + 手工修正/中文名）
 ├── index.html
 ├── assets/
 │   ├── css/app.css
 │   ├── data/sectors.json 板块分类表（可自行增删）
+│   ├── data/regions.json 股票市场细分表（美股/港股/A股/韩股/日股）
 │   └── js/
 │       ├── app.js        装配、数据流、交互
 │       ├── core/         状态、接口、指标、格式化、选币弹层

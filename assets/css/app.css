@@ -784,6 +784,10 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   font-size: 9.5px;
   color: var(--muted);
   letter-spacing: .3px;
+  /* 股票类合约这一行显示公司名，长名字要截断，不能顶到价格列上 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .px { font-family: var(--mono); font-weight: 500; }
@@ -2151,6 +2155,29 @@ button,
 }
 .list-toolbar > .tab-wrap { flex: 0 1 auto; min-width: 0; }
 .list-toolbar > .tb-spacer { flex: 1 1 auto; min-width: 0; }
+
+/* 股票市场细分入口（美股 / 港股 / A股 / 韩股 / 日股）
+   为什么是下拉不是一排胶囊：工具栏已经被 9 个页签 + 搜索 + 排序占满，
+   5 个带数字的胶囊要塞进去只能靠压窄页签（实测 1600 宽页签就开始变省略号）。
+   下拉按钮只占 ~80px，菜单里每个市场还能带上个数和平均涨跌幅。 */
+.list-toolbar > #list-region { flex: 0 0 auto; }
+/* .sector-select 自带 display:inline-flex，会盖掉 UA 的 [hidden] */
+.list-toolbar > #list-region[hidden] { display: none; }
+.menu-item .reg-chg {
+  margin-left: 6px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 400;
+  font-family: var(--mono);
+  opacity: .85;
+}
+/* 列表页窄到 700px 以下时工具栏已经塞不下第 10 个控件了（实测 1024 视口
+   只剩 544px 可用，再加这个入口会溢出 44px）。这一档先让「股票市场」让位，
+   列表本身还能用搜索和板块筛；再窄下去连「显示 N 个」也会隐藏。 */
+@container (max-width: 700px) {
+  .list-toolbar > #list-region,
+  .list-toolbar > #list-region-sep { display: none; }
+}
 
 /* 多品种同列工具栏：放不下就折成两行，而不是把「联动/详情」挤出可视区。
    宽度够时仍是一行 38px，观感不变。 */

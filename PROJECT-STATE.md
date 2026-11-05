@@ -1766,3 +1766,83 @@ PyInstaller onefile 把 Python 运行时、`index.html`、`assets/` 全塞进那
   `backup/2026-11-04_1830/`（本轮取景/滚动/两级分类改完后的快照）、
   `backup/2026-11-04_2110/`（加详情侧板 + 盘口档位之前）、
   `backup/2026-11-04_2130/`（大图模式 + 绿涨红跌之前）
+
+---
+
+## 2026-11-05 21:20 · TradFi 股票按市场细分（第 25 轮）
+
+用户要求：把 TradFi 里的股票类合约再细分成 **美股 / 港股 / A股 / 韩股 / 日股**，
+做成一个能主动筛选的大类，放在列表工具栏右侧那块空白（截图里的红框）。
+点名了 `ZHONGJI` 是 A 股映射，还有腾讯、小米、宇树科技这类。
+
+### 结论先行：币安自己就标了市场，但标错了两个
+
+`/fapi/v1/exchangeInfo` 的 `underlyingType` 直接给挂牌地：
+`EQUITY` 197 / `HK_EQUITY` 15 / `KR_EQUITY` 8 / `CN_EQUITY` 2（另有 COMMODITY 8、INDEX 3、FX 1）。
+**没有日股类型**，一个都没有。
+
+币安的两处错标（这才是需要人工修正的地方）：
+
+| 代码 | 公司 | 币安标的 | 实际 |
+|---|---|---|---|
+| `ZHONGJI` | 中际旭创 300308（创业板） | HK_EQUITY | 纯 A 股，无 H 股 |
+| `GIGADEV` | 兆易创新 603986（沪市主板） | HK_EQUITY | 纯 A 股，无 H 股 |
+
+看起来币安把所有中国股票统一塞进 `HK_EQUITY`，`CN_EQUITY` 只留给少数几个
+（CXMT 长鑫存储、UNITREE 宇树科技）。所以不能直接抄，必须有一张修正表。
+
+### 口径（写在 stock_map.py 顶部）
+
+1. 主口径 = `underlyingType`（挂牌地），不是猜的；
+2. `REGION_FIX` 覆盖掉第 1 步 —— 修上面两处错标；
+3. `REGION_EXTRA` 追加 —— 日股没有类型，用 `SONY`（ADR）+ `EWJ`（日本 ETF）补；
+4. 一个标的最多两个市场（索尼既在美股时段交易、又是日本公司），筛选是「包含」语义，
+   和 `r.sec` 一致。所以各市场数量相加（336）会大于总数（334）。
+
+现货 token 化股票也覆盖了：代码规则是「原代码 + B」（`NVDAB` / `TSLAB`），
+去掉尾字母 B 回查合约表，105 个里 101 个能对上，剩下 4 个（QNTB/STXB/USDEB/BBB）
+都是美股，直接按美股算。**不覆盖的话，点「美股」会把 105 个现货股票全过滤掉。**
+
+### 为什么最后做成下拉，而不是一排胶囊
+
+先按用户说的位置做了一排 5 个带计数的胶囊（美股 309 / 港股 13 / A股 4 / 韩股 8 / 日股 2），
+实测宽度 274px，而工具栏在 1600 视口（左侧自选 218 + 右侧详情 ~340）只剩 147px，
+结果胶囊被压到 147px 显示不全、页签同时被挤成「Pr…」——两头都难看。
+
+改用 `.sector-select` 下拉（复用图表墙「板块」那个组件）：按钮 76px，
+菜单里每行能放「市场名 + 平均涨跌幅 + 个数」，信息量比胶囊还大。
+列表页窄到 700px 以下（1024 视口实测溢出 44px）时用容器查询把入口整个藏起来，
+不然会破坏「窗口缩放工具栏不溢出」那条回归用例。
+
+### 改了什么
+
+- **新增** `stock_map.py`：`REGION_LABELS/ORDER`、`TYPE_TO_REGION`、`REGION_FIX`、
+  `REGION_EXTRA`、`NAMES`（约 80 个中文名），`regions_of()` / `name_of()`
+- **新增** `assets/data/regions.json`（326 个代码）、`tools/build_regions.py`
+- `server.py`
+  - `load_regions()`：读 regions.json，再叠加 `cache/sectors.local.json` 的 `reg` 增量
+  - `_fetch_futures_subtypes()` 返回值改成 `(板块, 市场)` —— 同一份 1.1MB 响应里就有
+    `underlyingType`，补市场不额外发请求
+  - `classify_bases()`：新增 `need_region`，新上的股票合约 10 分钟内补上市场归属
+    （`REGION_BULK_GAP`，补板块仍等 6 小时）；广播 `{"t":"reg"}`
+  - `api_market()`：每行加 `reg`、`nm`，顶层加 `regions.labels/order`
+  - `stock_name()`：合约用原代码、现货用「去掉尾 B」，两个方向都试，中文表优先、币安英文名兜底
+- 前端：`state.region` + `matchRegion()`；`list.js` 的 `buildRegionBar/openRegionMenu`；
+  列表第二行对股票类显示公司名（`中际旭创 · 永续`），其余币种不变；`.nm i` 加省略号截断
+- `tools/check_sectors.py`：`--stats` 多打一段市场分布；`one()` 多打市场 + 中文名
+  （顺手修了它还在按旧的单返回值调 `_fetch_futures_subtypes` 的问题）
+- `tools/shots.mjs`：视口宽高可用 `SHOT_W/SHOT_H` 覆盖，看窄屏不用改代码
+
+### 回归
+
+`27/27` 通过（新增 2 条）：
+- 「中际旭创归 A 股、腾讯归港股、索尼归日股」——含 BTC 不该有市场标签、`NVDAB` 必须有
+- 「菜单与筛选」——菜单 6 项齐全、选港股后 13 行全是港股、按钮高亮并显示「股票 · 港股」、
+  选「全部股票」能复位
+
+### 留给下次
+
+- 日股只有 2 个（SONY/EWJ），币安上了真日股合约后 `TYPE_TO_REGION` 加一行即可
+- 中概股（BABA/PDD）目前算美股 —— 按「挂牌地」口径是对的，但如果用户想单独筛「中概」，
+  得再加一个维度，不要塞进 A股（A股 ≠ 中概）
+- 板块条的计数不受市场筛选影响（和页签一致），选「港股 + AI」会得到空表并提示「该分类暂无标的」

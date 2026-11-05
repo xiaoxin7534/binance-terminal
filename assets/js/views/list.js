@@ -2,8 +2,10 @@
 
 import {
   market, state, save, dpOf, isFav, toggleFav, sectorLabels, matchTab, matchMkt,
+  matchRegion, regionLabels, regionOrder,
 } from '../core/store.js';
 import { fmtPrice, fmtCompact, fmtPct, dirClass, fmtSigned, fmtFunding } from '../core/fmt.js';
+import { openMenu } from '../core/picker.js';
 
 const ROW_H_MIN = 24;
 const ROW_H_MAX = 40;
@@ -29,6 +31,9 @@ const COLS = [
 const SECTOR_ORDER = ['AI', 'L1', 'RWA', 'L2', 'GAME', 'MEME', 'INFRA', 'DEFI', 'META', 'TRADFI', 'CHINESE'];
 
 const STAR_SVG = '<svg class="star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.6 9.7l5.8-.8z"/></svg>';
+
+/** 名字来自服务端（手工表 + 币安英文名），插进 innerHTML 前先转义 */
+const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 
 /** 按用户自定义顺序排列列 */
 function orderedCols() {
@@ -81,6 +86,9 @@ export class ListView {
     this.countEl = root.querySelector('#list-count');
     this.searchEl = root.querySelector('#list-search');
     this.sectorBar = root.querySelector('#sector-bar');
+    this.regionBtn = root.querySelector('#list-region');
+    this.regionSep = root.querySelector('#list-region-sep');
+    this.regionName = root.querySelector('#list-region-name');
     this.rows = [];
     this.pool = new Map();
     this.range = [-1, -1];
@@ -94,6 +102,7 @@ export class ListView {
     this.layoutCols();
     this.buildHead();
     this.buildSectorBar();
+    this.buildRegionBar();
     root.querySelectorAll('#list-tab button').forEach((b) => {
       b.classList.toggle('on', b.dataset.t === (state.tab || 'all'));
     });
@@ -239,6 +248,96 @@ export class ListView {
     });
   }
 
+  /* ---------------- 股票市场细分 ----------------
+     美股 / 港股 / A股 / 韩股 / 日股。只统计带市场标签的标的（即 TradFi 里的
+     股票类），加密币没有 reg 字段，不会被算进去。
+
+     为什么做成下拉而不是一排 chip：工具栏已经被 9 个页签 + 搜索 + 排序占满，
+     再塞 5 个带数字的胶囊，页签就会被挤成省略号（实测 1600 宽就开始了）。
+     下拉按钮只占 ~80px，点开之后每个市场能带上「个数 + 平均涨跌幅」，
+     比 chip 上塞得下的信息还多。
+
+     统计口径和板块条一致：按当前「现货/永续」一级分类算，不受页签和搜索影响，
+     否则点一个市场之后其他市场的数字会跟着变，没法横向对比。 */
+  regionStats() {
+    const counts = {};
+    const sum = {};
+    const seen = new Set();
+    let total = 0;
+    for (const r of market.values()) {
+      if (!matchMkt(r, state.mkt)) continue;
+      if (!r.reg || !r.reg.length) continue;
+      const k = r.b + '|' + (r.mkt || 'spot');
+      if (seen.has(k)) continue;
+      seen.add(k);
+      total++;
+      for (const g of r.reg) {
+        counts[g] = (counts[g] || 0) + 1;
+        sum[g] = (sum[g] || 0) + (r.chgp || 0);
+      }
+    }
+    return { counts, sum, total };
+  }
+
+  buildRegionBar() {
+    const btn = this.regionBtn;
+    if (!btn) return;
+    const { counts } = this.regionStats();
+    const keys = regionOrder.filter((k) => counts[k]);
+    // 一个市场都没有（老缓存没带 reg / 还没归类完）→ 整个入口隐藏，别留个空壳
+    if (!keys.length) {
+      // 但行情已经到位还一个都没有，说明这份数据压根没有市场字段，
+      // 此时若还留着上次存的 region，列表会永远空着、又找不到地方取消
+      if (market.size && state.region) {
+        state.region = null;
+        save();
+      }
+      btn.hidden = true;
+      if (this.regionSep) this.regionSep.hidden = true;
+      return;
+    }
+    // 切到现货之后原来选的港股可能一个都不剩，继续筛下去只会是空表
+    if (state.region && !counts[state.region]) {
+      state.region = null;
+      save();
+    }
+    btn.hidden = false;
+    if (this.regionSep) this.regionSep.hidden = false;
+    if (state.region) {
+      this.regionName.textContent = '股票 · ' + (regionLabels[state.region] || state.region);
+      btn.classList.add('on');
+    } else {
+      this.regionName.textContent = '股票市场';
+      btn.classList.remove('on');
+    }
+  }
+
+  openRegionMenu() {
+    const { counts, sum, total } = this.regionStats();
+    const keys = regionOrder.filter((k) => counts[k]);
+    if (!keys.length) return;
+    const items = [
+      { key: '', label: '全部股票', count: total },
+      { divider: true },
+    ];
+    for (const k of keys) {
+      const n = counts[k];
+      const a = n ? sum[k] / n : 0;
+      items.push({
+        key: k,
+        label: `${regionLabels[k] || k}<em class="reg-chg ${dirClass(a)}">${fmtPct(a)}</em>`,
+        count: n,
+      });
+    }
+    openMenu(this.regionBtn, items, state.region || '', (k) => {
+      state.region = k || null;
+      save();
+      this.buildRegionBar();
+      this.rebuild(true);
+      this.scroller.scrollTop = 0;
+    });
+  }
+
   /* ---------------- 事件 ---------------- */
   bind() {
     this.thead.addEventListener('click', (e) => {
@@ -288,6 +387,7 @@ export class ListView {
       this.mktBar.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
       save();
       this.buildSectorBar();
+      this.buildRegionBar();
       this.rebuild(true);
       this.scroller.scrollTop = 0;
     });
@@ -316,6 +416,11 @@ export class ListView {
       this.rebuild(true);
       this.scroller.scrollTop = 0;
     });
+
+    // 股票市场细分：点按钮开菜单（和图表墙的「板块」是同一个组件）
+    if (this.regionBtn) {
+      this.regionBtn.addEventListener('click', () => this.openRegionMenu());
+    }
 
     this.inner.addEventListener('click', (e) => {
       const star = e.target.closest('.star');
@@ -415,6 +520,7 @@ export class ListView {
     for (const r of market.values()) {
       if (!matchMkt(r, state.mkt)) continue;
       if (!matchTab(r, tab)) continue;
+      if (!matchRegion(r, state.region)) continue;
       if (sector && !(r.sec || []).includes(sector)) continue;
       if (q && !r.s.includes(q)) continue;
       list.push(r);
@@ -510,9 +616,18 @@ export class ListView {
 
     this.pool.clear();
     if (!this.rows.length) {
-      this.inner.innerHTML = state.mkt === 'perp'
-        ? '<div class="list-empty">合约行情未就绪<br><span style="font-size:11px;opacity:.75;line-height:1.8">请确认本机代理（v2rayN / Clash）已开启<br>合约行情流经 SOCKS5 连接 fstream.binance.com</span></div>'
-        : '<div class="list-empty">该分类暂无标的</div>';
+      // 只有「一个永续都没有」才可能是网络/代理问题。
+      // 否则「永续 + 港股 + AI」这种筛选组合出来的空表会被误判成行情没起来。
+      const noPerpAtAll = state.mkt === 'perp'
+        && ![...market.values()].some((r) => r.mkt === 'perp');
+      if (noPerpAtAll) {
+        this.inner.innerHTML = '<div class="list-empty">合约行情未就绪<br><span style="font-size:11px;opacity:.75;line-height:1.8">请确认本机代理（v2rayN / Clash）已开启<br>合约行情流经 SOCKS5 连接 fstream.binance.com</span></div>';
+      } else {
+        const tip = (state.region || state.sector)
+          ? '<br><span style="font-size:11px;opacity:.7;line-height:1.8">市场 / 板块 / 页签叠加后没有交集，换个条件试试</span>'
+          : '';
+        this.inner.innerHTML = `<div class="list-empty">该分类暂无标的${tip}</div>`;
+      }
       return;
     }
     const frag = document.createDocumentFragment();
@@ -526,13 +641,19 @@ export class ListView {
 
   cellHtml(c, row, dp, cls, amp) {
     switch (c.key) {
-      case 's':
+      case 's': {
+        // 股票类合约的第二行换成公司名（「中际旭创 · 永续」比「USDT 永续」有用），
+        // 其余币种保持原来的计价货币 + 市场类型
+        const sub = (state.tab === 'new' && row.ln)
+          ? new Date(row.ln).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+          : row.nm
+            ? esc(row.nm) + (row.mkt === 'perp' ? ' · 永续' : '')
+            : (row.q || 'USDT') + (row.mkt === 'perp' ? ' 永续' : '');
         return `<div class="sym-cell">
           ${STAR_SVG.replace('class="star"', `class="star${isFav(row.s) ? ' on' : ''}"`)}
-          <span class="nm"><b>${row.b}</b><i>${(state.tab === 'new' && row.ln)
-            ? new Date(row.ln).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
-            : (row.q || 'USDT') + (row.mkt === 'perp' ? ' 永续' : '')}</i></span>
+          <span class="nm"><b>${row.b}</b><i>${sub}</i></span>
         </div>`;
+      }
       case 'l': return `<div class="r px ${cls}">${fmtPrice(row.l, dp)}</div>`;
       case 'chgp': return `<div class="r"><span class="pill ${cls}">${fmtPct(row.chgp)}</span></div>`;
       case 'chg': return `<div class="r ${cls}">${fmtSigned(row.l - row.o, dp)}</div>`;
@@ -559,6 +680,11 @@ export class ListView {
     const el = document.createElement('div');
     el.className = 'row' + (row.s === this.selected ? ' sel' : '');
     el.dataset.sym = row.s;
+    // 股票类合约带中文名：悬停就知道 ZHONGJI 是中际旭创、HK1810 是小米
+    if (row.nm) {
+      const regs = (row.reg || []).map((k) => regionLabels[k] || k).join('·');
+      el.title = regs ? `${row.nm}（${regs}）` : row.nm;
+    }
     el.style.top = (i * this.rowH) + 'px';
     const dp = row.dp ?? 2;
     const cls = dirClass(row.chgp);
@@ -634,6 +760,7 @@ export class ListView {
   /** 板块标签更新后重建分类栏（app.js 定时刷新时调用） */
   setLabels() {
     this.buildSectorBar();
+    this.buildRegionBar();
   }
 
   /** 筛选条件被外部（图表墙的板块菜单）改写后，同步按钮状态并重绘 */
@@ -647,6 +774,7 @@ export class ListView {
       });
     }
     this.buildSectorBar();
+    this.buildRegionBar();
     this.rebuild(true);
     this.scroller.scrollTop = 0;
   }
@@ -654,6 +782,7 @@ export class ListView {
   onShow() {
     this.layoutCols();
     this.buildSectorBar();
+    this.buildRegionBar();
     this.range = [-1, -1];
     this.renderWindow(true);
   }

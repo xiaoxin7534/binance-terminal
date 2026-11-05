@@ -3,7 +3,8 @@
 import { api, openStream } from './core/api.js';
 import {
   state, market, seedMarket, applyTicks, applyFunding, onFrame, save,
-  setSectorLabels, sectorLabels, matchTab, matchMkt, SECTOR_KEYS, TAB_KEYS, TAPE_SYMBOLS,
+  setSectorLabels, sectorLabels, setRegionLabels,
+  matchTab, matchMkt, SECTOR_KEYS, TAB_KEYS, TAPE_SYMBOLS,
   isFav, toggleFav,
 } from './core/store.js';
 import { openMenu } from './core/picker.js';
@@ -637,6 +638,7 @@ async function refreshMarket() {
     const d = await api.market();
     seedMarket(d.rows);
     setSectorLabels(d.labels);
+    setRegionLabels(d.regions);
     list.setLabels();
     list.rebuild(false);
     updateSectorBtn();
@@ -750,6 +752,7 @@ async function boot() {
     const data = await marketReq;
     seedMarket(data.rows);
     setSectorLabels(data.labels);
+    setRegionLabels(data.regions);
     buildTape();
     list.setLabels();
     list.rebuild(true);
@@ -802,6 +805,8 @@ async function boot() {
           refreshMarket();
           break;
         }
+        // 服务端给已归类的股票合约补上了市场归属：重拉快照即可（很少发生）
+        case 'reg': refreshMarket(); break;
         default: break;
       }
     },

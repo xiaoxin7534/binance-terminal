@@ -24,6 +24,7 @@ from sector_rules import TAG_MAP, SUB_MAP  # noqa: E402
 
 def stats():
     S.load_sectors()
+    S.load_regions()
     m = S.SECTORS["map"]
     c = collections.Counter()
     for keys in m.values():
@@ -34,13 +35,33 @@ def stats():
         print("  %-12s %4d" % (S.SECTORS["labels"].get(k, k), n))
     print("  未归类          %4d" % sum(1 for v in m.values() if not v))
 
+    r = S.REGIONS["map"]
+    rc = collections.Counter()
+    for reg in r.values():
+        for k in reg:
+            rc[k] += 1
+    print("\n股票市场细分（共 %d 个代码）：" % len(r))
+    for k in (S.REGION_ORDER or ["US", "HK", "CN", "KR", "JP"]):
+        print("  %-6s %4d" % (S.REGIONS["labels"].get(k, k), rc[k]))
+    # 归成了 TradFi 但不在任何股票市场里的：多数是商品 / 指数 / 外汇 / Pre-IPO，
+    # 本来就该没有市场归属。如果这里面出现了明显是股票的名字，才需要重建 regions.json。
+    no_reg = [b for b, ks in m.items()
+              if any(x in ("TRADFI", "PREIPO", "PREMARKET") for x in ks) and b not in r]
+    if no_reg:
+        print("\n  非股票类 TradFi %d 个（商品/指数/外汇/Pre-IPO，无市场归属属正常）："
+              % len(no_reg))
+        print("    " + "、".join(sorted(no_reg)))
+
 
 def one(base):
     S.detect_proxy()
     S.load_sectors()
+    S.load_regions()
     base = base.upper()
     print("查询 %s" % base)
     print("  当前分类:", S.SECTORS["map"].get(base) or "（未归类）")
+    print("  股票市场:", S.REGIONS["map"].get(base) or "（不是股票类）")
+    print("  中文名  :", S.stock_name(base) or "（没有）")
 
     keys, tags = S._fetch_spot_tags(base)
     print("  现货标签:", tags or "（接口没有返回）")
@@ -50,8 +71,9 @@ def one(base):
         if unknown:
             print("  未映射的标签:", unknown, "← 需要的话加进 sector_rules.TAG_MAP")
 
-    fut = S._fetch_futures_subtypes([base])
+    fut, reg = S._fetch_futures_subtypes([base])
     print("  合约归类:", fut.get(base) or "（exchangeInfo 里没有这个 base）")
+    print("  合约市场:", reg.get(base) or "（exchangeInfo 没给股票类型）")
 
 
 def unmapped():

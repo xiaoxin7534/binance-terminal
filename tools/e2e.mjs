@@ -626,6 +626,130 @@ test('窗口缩放：工具栏按钮不被压扁', async (s) => {
   assert(!bad.length, bad.join('；'));
 });
 
+test('股票市场细分：中际旭创归 A 股、腾讯归港股、索尼归日股', async (s) => {
+  const r = await s.ev(`
+    const m = window.__term.market;
+    const reg = (b) => {
+      const row = m.get(b + 'USDT@f') || m.get(b + 'USDT');
+      return row && row.reg ? row.reg : [];
+    };
+    return {
+      zhongji: reg('ZHONGJI'), gigadev: reg('GIGADEV'), unitree: reg('UNITREE'),
+      tencent: reg('TENCENT'), meituan: reg('MEITUAN'),
+      samsung: reg('SAMSUNG'), skhynix: reg('SKHYNIX'),
+      sony: reg('SONY'),
+      tsla: reg('TSLA'), nvdab: reg('NVDAB'),
+      btc: reg('BTC'),
+    };
+  `);
+  const eq = (k, want, msg) => assertEq(JSON.stringify(r[k]), JSON.stringify(want), msg);
+  // 币安把中际旭创/兆易创新标成了 HK_EQUITY，这里必须改判成 A 股
+  eq('zhongji', ['CN'], '中际旭创应归 A 股');
+  eq('gigadev', ['CN'], '兆易创新应归 A 股');
+  eq('unitree', ['CN'], '宇树科技应归 A 股');
+  eq('tencent', ['HK'], '腾讯应归港股');
+  eq('meituan', ['HK'], '美团应归港股');
+  eq('samsung', ['KR'], '三星应归韩股');
+  eq('skhynix', ['KR'], 'SK 海力士应归韩股');
+  // 币安没有日股分类，索尼 ADR 靠 REGION_EXTRA 补；它在美股时段交易，两个都算
+  assert(r.sony.includes('JP'), '索尼应归日股：' + JSON.stringify(r.sony));
+  assert(r.sony.includes('US'), '索尼 ADR 也应留在美股：' + JSON.stringify(r.sony));
+  eq('tsla', ['US'], '特斯拉应归美股');
+  assert(r.nvdab.includes('US'), '现货 token 化股票（NVDAB）也要有市场：' + JSON.stringify(r.nvdab));
+  eq('btc', [], '加密币不该有市场标签');
+});
+
+test('股票市场细分：菜单与筛选', async (s) => {
+  // 前一个用例可能留下筛选状态，先复位
+  await s.ev(`
+    window.__term.state.region = null;
+    document.querySelector('#tabs button[data-view="list"]').click();
+    await new Promise(r=>setTimeout(r,700));
+    window.__term.list.syncFilterUI();
+    return 1;
+  `);
+  const menu = await s.ev(`
+    const b = document.querySelector('#list-region');
+    if (!b || b.hidden || !b.offsetWidth) return { missing: true };
+    b.click();
+    await new Promise(r=>setTimeout(r,320));
+    return {
+      keys: [...document.querySelectorAll('.popover.menu .menu-item')].map(x => x.dataset.k),
+      text: [...document.querySelectorAll('.popover.menu .menu-item')].map(x => x.textContent.trim()),
+    };
+  `);
+  assert(!menu.missing, '工具栏里没有「股票市场」入口（regions.json 缺失？）');
+  for (const k of ['', 'US', 'HK', 'CN', 'KR', 'JP']) {
+    assert(menu.keys.includes(k), `菜单里缺少 ${k || '全部'}：${JSON.stringify(menu.keys)}`);
+  }
+  assert(menu.text.some((t) => t.includes('日股')), '菜单里没有日股：' + JSON.stringify(menu.text));
+
+  const hk = await s.ev(`
+    document.querySelector('.popover.menu .menu-item[data-k="HK"]').click();
+    await new Promise(r=>setTimeout(r,800));
+    const t = window.__term;
+    const rows = t.list.rows;
+    return {
+      region: t.state.region,
+      n: rows.length,
+      bad: rows.filter(x => !(x.reg || []).includes('HK')).map(x => x.b).slice(0, 5),
+      label: document.querySelector('#list-region-name').textContent,
+      on: document.querySelector('#list-region').classList.contains('on'),
+      bases: rows.map(x => x.b),
+    };
+  `);
+  assertEq(hk.region, 'HK', '选了港股但状态没变');
+  assert(hk.n > 0, '港股筛选后一行都没有');
+  assert(!hk.bad.length, '筛选后混进了非港股：' + hk.bad.join(','));
+  assert(hk.label.includes('港股'), '按钮上没显示当前市场：' + hk.label);
+  assert(hk.on, '按钮没有高亮');
+  assert(hk.bases.includes('TENCENT'), '港股里应该能看到腾讯：' + hk.bases.join(','));
+
+  const back = await s.ev(`
+    document.querySelector('#list-region').click();
+    await new Promise(r=>setTimeout(r,300));
+    document.querySelector('.popover.menu .menu-item[data-k=""]').click();
+    await new Promise(r=>setTimeout(r,700));
+    return { region: window.__term.state.region, n: window.__term.list.rows.length,
+             label: document.querySelector('#list-region-name').textContent };
+  `);
+  assertEq(back.region, null, '「全部股票」没清掉筛选');
+  assert(back.n > hk.n, `取消筛选后行数没恢复：${hk.n} -> ${back.n}`);
+  assert(back.label.includes('股票市场'), '按钮文字没复位：' + back.label);
+
+  // 筛选组合出空表时，不能误报成「合约行情未就绪」（那是网络问题的提示）
+  const empty = await s.ev(`
+    document.querySelector('#list-mkt [data-m="perp"]').click();
+    await new Promise(r=>setTimeout(r,500));
+    document.querySelector('#list-region').click();
+    await new Promise(r=>setTimeout(r,300));
+    document.querySelector('.popover.menu .menu-item[data-k="HK"]').click();
+    await new Promise(r=>setTimeout(r,600));
+    const ai = document.querySelector('#sector-bar [data-sec="AI"]');
+    if (!ai) return { skip: true };
+    ai.click();
+    await new Promise(r=>setTimeout(r,600));
+    const el = document.querySelector('.tbody-inner .list-empty');
+    const out = { n: window.__term.list.rows.length, text: el ? el.textContent : '' };
+    // 复位，别影响后面的用例
+    document.querySelector('#sector-bar [data-sec=""]').click();
+    await new Promise(r=>setTimeout(r,400));
+    document.querySelector('#list-mkt [data-m="all"]').click();
+    await new Promise(r=>setTimeout(r,400));
+    document.querySelector('#list-region').click();
+    await new Promise(r=>setTimeout(r,300));
+    document.querySelector('.popover.menu .menu-item[data-k=""]').click();
+    await new Promise(r=>setTimeout(r,500));
+    return out;
+  `);
+  if (!empty.skip) {
+    assertEq(empty.n, 0, '永续 + 港股 + AI 应该没有交集');
+    assert(empty.text.includes('暂无标的'), '空表提示不对：' + empty.text);
+    assert(!empty.text.includes('未就绪'), '把筛选空表误报成行情未就绪：' + empty.text);
+  }
+  assertEq(await s.ev('return window.__term.state.region;'), null, '用例结束没复位 region');
+});
+
 test('行情条：单击选中 / 双击填格子 / 右键菜单', async (s) => {
   const r = await s.ev(`
     const items = [...document.querySelectorAll('#tape .tape-item')];

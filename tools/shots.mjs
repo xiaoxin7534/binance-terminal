@@ -8,7 +8,8 @@
  *   node tools/shots.mjs --only=list 只截某个状态（grid/list/big/detail）
  *
  * 前提：本地服务已经跑起来（python server.py），默认 8848。
- * 固定 1600x900 视口 + 独立 user-data-dir，保证每次截图条件一致。
+ * 默认 1600x900 视口 + 独立 user-data-dir，保证每次截图条件一致。
+ * 想看别的宽度：SHOT_W=1366 SHOT_H=768 node tools/shots.mjs
  */
 
 import { spawn } from 'node:child_process';
@@ -17,6 +18,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:8848';
+const W = Number(process.env.SHOT_W || 1600);
+const H = Number(process.env.SHOT_H || 900);
 const CDP_PORT = Number(process.env.SHOT_CDP_PORT || 9666);
 const HEADED = process.argv.includes('--headed');
 const args = process.argv.slice(2);
@@ -70,11 +73,11 @@ async function main() {
   mkdirSync(OUT, { recursive: true });
   const profile = mkdtempSync(join(tmpdir(), 'bt-shot-'));
   const proc = spawn(CHROME, [
-    HEADED ? '--window-size=1600,900' : '--headless=new',
+    HEADED ? `--window-size=${W},${H}` : '--headless=new',
     // 不能用 --disable-gpu：lightweight-charts 的多层 canvas 会截出黑块
     // （详情面板的迷你走势图曾经整块发黑，其实是这个参数造成的假象）
     '--use-angle=swiftshader',
-    '--hide-scrollbars', '--window-size=1600,900',
+    '--hide-scrollbars', `--window-size=${W},${H}`,
     '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${profile}`, 'about:blank',
   ], { stdio: 'ignore' });
@@ -94,7 +97,7 @@ async function main() {
     const s = new Session(ws);
 
     await s.send('Emulation.setDeviceMetricsOverride', {
-      width: 1600, height: 900, deviceScaleFactor: 1, mobile: false,
+      width: W, height: H, deviceScaleFactor: 1, mobile: false,
     });
     await s.send('Page.navigate', { url: BASE + '/' });
     // 等 8 个格子都有 K 线，截图才不会拍到半空的图
