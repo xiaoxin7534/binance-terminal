@@ -2091,14 +2091,71 @@ button,
   font-variant-numeric: tabular-nums;
 }
 
-/* 工具栏子项不许被压缩（之前「扫描器」「告警」被挤成「扫描」「告」） */
+/* ==========================================================================
+   工具栏防压缩
+   --------------------------------------------------------------------------
+   之前只给 .toolbar（多品种同列）写了防压缩，列表页用的是 .list-toolbar，
+   完全没生效：窗口一窄，flex 子项按默认 flex-shrink:1 等比收缩，
+   「详情」按钮被压到 34px，两个字折成两行溢出按钮框。
+   ========================================================================== */
 .toolbar > *,
 .toolbar .tb-group,
 .toolbar .chip,
 .toolbar .switch {
   flex: 0 0 auto;
 }
-.toolbar .chip { white-space: nowrap; }
+
+/* spacer 必须保持可伸展，否则右侧的开关/按钮不会贴右边 */
+.toolbar > .tb-spacer { flex: 1 1 auto; min-width: 0; }
+
+/* 列表页工具栏：除搜索框、标签组、spacer 之外一律不压缩 */
+.list-toolbar > * { flex: 0 0 auto; }
+.list-toolbar > .search { flex: 0 1 190px; min-width: 96px; }
+/* 「显示 N 个」是压力阀：空间不够时先缩它、省略号收尾，别去压按钮 */
+.list-toolbar > #list-count {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 更窄的时候整段让位给分类标签条，省得标签被挤到只剩两个 */
+.list-main { container-type: inline-size; }
+@container (max-width: 760px) {
+  .list-toolbar > #list-count { display: none; }
+}
+.list-toolbar > .tab-wrap { flex: 0 1 auto; min-width: 0; }
+.list-toolbar > .tb-spacer { flex: 1 1 auto; min-width: 0; }
+
+/* 多品种同列工具栏：放不下就折成两行，而不是把「联动/详情」挤出可视区。
+   宽度够时仍是一行 38px，观感不变。 */
+.toolbar {
+  height: auto;
+  min-height: 38px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-content: center;
+  row-gap: 5px;
+  padding: 4px 10px;
+  overflow: visible;
+}
+/* 折行后右侧开关仍然贴右 */
+.toolbar > .switch:first-of-type { margin-left: auto; }
+
+/* 窄到放不下时整条横向滚动，而不是把按钮压扁 */
+.list-toolbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.list-toolbar::-webkit-scrollbar { display: none; }
+
+/* 按钮/开关里的文字一律不折行 */
+.chip,
+.switch span,
+.top-chip {
+  white-space: nowrap;
+}
 
 /* 苹方本地字体：系统装了就直接用（Mac 自带 / Windows 手动装），
    没装就退到 --font 里后面的字体。把字体文件放到 assets/css/fonts/ 也能生效。 */

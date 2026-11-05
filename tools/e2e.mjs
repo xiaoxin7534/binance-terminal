@@ -568,6 +568,38 @@ test('5 日连续分时', async (s) => {
   assert(r.legend.includes('首日开'), '图例没显示首日开盘价：' + r.legend);
 });
 
+test('窗口缩放：工具栏按钮不被压扁', async (s) => {
+  await s.ev(`document.querySelector('#tabs button[data-view="list"]').click(); return 1;`);
+  await new Promise((r) => setTimeout(r, 800));
+  const bad = [];
+  for (const w of [1600, 1366, 1200, 1024]) {
+    await s.send('Emulation.setDeviceMetricsOverride', {
+      width: w, height: 800, deviceScaleFactor: 1, mobile: false,
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    const r = await s.ev(`
+      const btn = document.querySelector('#list-detail-btn');
+      const tb = btn.closest('.list-toolbar');
+      const br = btn.getBoundingClientRect();
+      const cs = getComputedStyle(btn);
+      return {
+        h: Math.round(br.height),
+        w: Math.round(br.width),
+        lines: Math.round(br.height / parseFloat(cs.lineHeight)),
+        overflow: tb.scrollWidth - tb.clientWidth,
+        wrap: cs.whiteSpace,
+      };
+    `);
+    if (r.lines > 1) bad.push(`${w}px 下「详情」折成 ${r.lines} 行`);
+    if (r.h > 26) bad.push(`${w}px 下「详情」高度 ${r.h}px（应为 24）`);
+    if (r.w < 36) bad.push(`${w}px 下「详情」宽 ${r.w}px（被压扁）`);
+    if (r.overflow > 1) bad.push(`${w}px 下工具栏溢出 ${r.overflow}px`);
+    if (r.wrap !== 'nowrap') bad.push(`${w}px 下 white-space=${r.wrap}`);
+  }
+  await s.send('Emulation.clearDeviceMetricsOverride');
+  assert(!bad.length, bad.join('；'));
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();

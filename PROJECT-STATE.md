@@ -419,6 +419,52 @@ binance-terminal/
 **已经排除的**：主线程不卡。静置 20 秒只有 1 个 60ms 长任务，切视图约 50ms，
 长墙滚动 16ms/帧。所以「不流畅」只可能是等网络，不是渲染。
 
+### 工具栏按钮被压扁（2026-11-05 12:50 修）
+
+**现象**：窗口变窄时，行情列表工具栏的「详情」按钮被压到 32~34px，
+两个字折成两行溢出按钮框（截图里「详」「情」上下分家）。
+
+**根因**：上一轮 UI 润色时写的防压缩规则只覆盖了 `.toolbar`：
+
+```css
+.toolbar > * { flex: 0 0 auto; }     /* 多品种同列页 */
+```
+
+但列表页用的是 **`.list-toolbar`**（另一个类名），完全没被匹配到。
+flex 子项默认 `flex-shrink: 1`，空间不够时等比收缩；`.chip` 也没设
+`white-space: nowrap`，于是文字折行。
+
+实测：1366px 下按钮宽 32px、高 34px（两行）；1600px 正常 43×24。
+
+**修法**：
+
+| 规则 | 作用 |
+|---|---|
+| `.list-toolbar > * { flex: 0 0 auto }` | 子项不再收缩 |
+| `.list-toolbar > .search { flex: 0 1 190px; min-width: 96px }` | 搜索框仍可缩 |
+| `.list-toolbar > .tab-wrap { flex: 0 1 auto; min-width: 0 }` | 分类标签条仍可缩（内部横向滚动） |
+| `.list-toolbar > #list-count { flex: 0 1 auto; text-overflow: ellipsis }` | 「显示 N 个」当压力阀，省略号收尾 |
+| `.chip/.switch span/.top-chip { white-space: nowrap }` | 文字一律不折行 |
+| `.list-toolbar { overflow-x: auto }` | 极窄时整条横向滚动，不压元素 |
+
+**顺带修的两处**：
+
+1. **`.tb-spacer` 被自己的规则打掉**：`.toolbar > *` 的优先级和 `.tb-spacer { flex: 1 }`
+   相同、位置更靠后，把 spacer 变成 `flex: 0 0 auto`，右侧开关不再贴右。
+   补 `.toolbar > .tb-spacer { flex: 1 1 auto }`。
+2. **多品种同列工具栏在窄窗口溢出**：1200px 下内容需 1255px，溢出 273px，
+   「联动/详情」被挤出可视区（`overflow-x: auto` 又没有可见滚动条，等于看不见）。
+   改成 `flex-wrap: wrap` + `min-height: 38px`：放不下就折两行，宽度够时仍是一行 38px。
+   折行后给第一个 `.switch` 加 `margin-left: auto`，保持贴右。
+
+**窄屏下「显示 N 个」让位**：`.list-main` 加 `container-type: inline-size`，
+容器宽度 < 760px 时隐藏该文字，把空间让给分类标签条。
+（实测 `container-type` 不影响表格列宽计算，开关前后各列宽度完全一致。）
+
+**回归用例**：新增「窗口缩放：工具栏按钮不被压扁」，在 1600/1366/1200/1024
+四个宽度下断言按钮 43×24、单行、`white-space: nowrap`、工具栏无溢出。
+临时回退 CSS 验证过这条用例确实会失败（报「1366px 下宽 32px」）。
+
 ### UI 润色 + 苹方字体（2026-11-05 03:30）
 
 **字体**：`--font` 变量集中管理，顺序是
