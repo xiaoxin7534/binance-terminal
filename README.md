@@ -247,6 +247,11 @@ node tools/shots.mjs before # 改界面前后各截一套图，存到 .shots/
 - 双击某一行 → **直接进大图模式**（和格子里双击一样）
 - 同一币种的多个计价对只保留成交额最大的一个，避免 BTC 出现两行（USDC 对去 USDC 页签看）
 
+> **新币会自动归类**：币安上新币后，行情流几秒内就能看到它，服务端同时查一次它的官方标签
+> （单币约 0.5 KB，空闲时零请求），归好类就广播给界面刷新，不用重新打包。
+> 归属不确定的（币安给了标签但不对应我们这 13 个板块）会被记下来不再重复查。
+> 想手工核对：`python tools/check_sectors.py PEPE`。
+>
 > 板块归属写在 `assets/data/sectors.json`，一个币可以属于多个板块（比如 ETH 同时是 Layer-1 和 DeFi）。
 > 这份表现在**由币安官方数据生成**，不是手写的：`python tools/build_sectors.py`。
 > 数据源是合约 `exchangeInfo` 的 `underlyingSubType`（币安合约页的板块标签就来自这里）

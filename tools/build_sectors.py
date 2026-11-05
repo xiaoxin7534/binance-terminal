@@ -29,68 +29,8 @@ import server  # noqa: E402  复用代理探测和请求封装
 
 OUT = os.path.join(ROOT, "assets", "data", "sectors.json")
 
-# 我们的板块 key -> 中文名
-LABELS = {
-    "AI": "AI",
-    "L1": "Layer-1",
-    "L2": "Layer-2",
-    "RWA": "RWA",
-    "GAME": "Gaming",
-    "MEME": "Meme",
-    "INFRA": "基础服务",
-    "DEFI": "DeFi",
-    "META": "元宇宙",
-    "TRADFI": "TradFi",
-    "CHINESE": "Chinese",
-    "PREIPO": "Pre-IPO",
-    "PREMARKET": "Pre-Market",
-}
-
-# 合约 underlyingSubType -> 我们的 key
-SUB_MAP = {
-    "AI": "AI",
-    "Meme": "MEME",
-    "DeFi": "DEFI",
-    "Layer-1": "L1",
-    "Layer-2": "L2",
-    "Gaming": "GAME",
-    "Metaverse": "META",
-    "RWA": "RWA",
-    "Infrastructure": "INFRA",
-    "Chinese": "CHINESE",
-    "Pre-IPO": "PREIPO",
-    "Pre-Market": "PREMARKET",
-    "TradFi": "TRADFI",
-}
-
-# 现货 tags -> 我们的 key（Layer1_Layer2 合并的，只能归到 L1）
-TAG_MAP = {
-    "AI": "AI",
-    "Meme": "MEME",
-    "defi": "DEFI",
-    "Layer1_Layer2": "L1",
-    "Gaming": "GAME",
-    "Metaverse": "META",
-    "RWA": "RWA",
-    "Infrastructure": "INFRA",
-    "bStocks": "TRADFI",
-    "tCommodities": "TRADFI",
-}
-
-# 合约 underlyingType -> 兜底 key
-TYPE_MAP = {
-    "EQUITY": "TRADFI",
-    "HK_EQUITY": "TRADFI",
-    "KR_EQUITY": "TRADFI",
-    "CN_EQUITY": "TRADFI",
-    "COMMODITY": "TRADFI",
-    "INDEX": "TRADFI",
-    "FX": "TRADFI",
-    "PREMARKET": "PREIPO",
-}
-
-ORDER = ["AI", "L1", "L2", "RWA", "GAME", "MEME", "INFRA", "DEFI", "META",
-         "TRADFI", "PREIPO", "PREMARKET", "CHINESE"]
+# 规则表统一放在 sector_rules.py，server.py 的运行时增量归类也用同一份
+from sector_rules import LABELS, ORDER, keys_from_futures, keys_from_tags  # noqa: E402
 
 
 def fetch_futures():
@@ -103,13 +43,7 @@ def fetch_futures():
         if not base:
             continue
         keys = out.setdefault(base, set())
-        for t in (s.get("underlyingSubType") or []):
-            k = SUB_MAP.get(t)
-            if k:
-                keys.add(k)
-        k = TYPE_MAP.get(s.get("underlyingType"))
-        if k:
-            keys.add(k)
+        keys.update(keys_from_futures(s.get("underlyingSubType"), s.get("underlyingType")))
     return out
 
 
@@ -128,10 +62,7 @@ def fetch_spot():
         if not base:
             continue
         keys = out.setdefault(base, set())
-        for t in (r.get("tags") or []):
-            k = TAG_MAP.get(t)
-            if k:
-                keys.add(k)
+        keys.update(keys_from_tags(r.get("tags")))
     return out
 
 

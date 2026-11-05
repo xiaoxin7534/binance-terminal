@@ -631,6 +631,20 @@ function bindToolbar() {
 }
 
 /* ------------------------------------------------------------------ 启动 */
+/** 拉一次全量快照并重建列表（定时轮询和「新币归类」事件共用） */
+async function refreshMarket() {
+  try {
+    const d = await api.market();
+    seedMarket(d.rows);
+    setSectorLabels(d.labels);
+    list.setLabels();
+    list.rebuild(false);
+    updateSectorBtn();
+    if (watch) watch.render();
+    if (!tapeRefs.size) buildTape();
+  } catch (e) { /* 网络抖动忽略，等下一轮 */ }
+}
+
 async function boot() {
   applyTheme(state.theme, false);
 
@@ -775,6 +789,19 @@ async function boot() {
           if (msg.up) setTimeout(() => grid.cells.forEach((c) => c.load(true)), 900);
           break;
         case 'hi': setConn(msg.ws); break;
+        // 服务端给新上架的币补上了板块分类：立刻刷新列表，不等 30 秒轮询
+        case 'sec': {
+          const names = Object.keys(msg.d || {});
+          if (names.length) {
+            const first = names.slice(0, 3).map((b) => {
+              const secs = (msg.d[b] || []).map((k) => sectorLabels[k] || k);
+              return secs.length ? `${b}（${secs.join('/')}）` : b;
+            }).join('、');
+            toast(`新币已归类：${first}${names.length > 3 ? ` 等 ${names.length} 个` : ''}`);
+          }
+          refreshMarket();
+          break;
+        }
         default: break;
       }
     },
@@ -820,18 +847,7 @@ async function boot() {
   }, 320);
 
   // 每 30 秒补一次全量快照，兜住漏掉的币种
-  setInterval(async () => {
-    try {
-      const d = await api.market();
-      seedMarket(d.rows);
-      setSectorLabels(d.labels);
-      list.setLabels();
-      list.rebuild(false);
-      updateSectorBtn();
-      if (watch) watch.render();
-      if (!tapeRefs.size) buildTape();
-    } catch (e) { /* ignore */ }
-  }, 30000);
+  setInterval(refreshMarket, 30000);
 }
 
 /* ------------------------------------------------------------------ 快捷键 */

@@ -19,6 +19,8 @@ import argparse
 import base64
 import concurrent.futures
 import gzip
+
+from sector_rules import ORDER as SECTOR_ORDER, TAG_MAP, keys_from_tags, keys_from_futures
 import http.client
 import queue
 import json
@@ -554,14 +556,270 @@ _listing_lock = threading.Lock()
 
 
 def load_sectors():
+    """载入随包发布的分类表，再叠加运行时补录的增量（cache/sectors.local.json）
+
+    增量单独存的原因：exe 里的 assets/data/sectors.json 在 _MEIPASS 只读，
+    新品种归类结果必须落到可写目录，否则每次重启都要重新查一遍。
+    """
     global SECTORS
     try:
         with open(SECTORS_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        SECTORS = {"labels": d.get("labels", {}), "map": d.get("map", {})}
+        SECTORS = {"labels": d.get("labels", {}), "map": dict(d.get("map", {}))}
         log("载入板块分类 %d 个币种" % len(SECTORS["map"]))
     except Exception as e:      # noqa: BLE001
         log("板块分类载入失败: %s" % e)
+    load_sectors_local()
+
+
+# --------------------------------------------------------------------------
+# 新币自动归类
+#
+# 币安上新币时，行情流（!ticker@arr）会在几秒内把它推进 HUB.tickers，
+# 但板块分类来自静态表 —— 新币没有 sec，落不进任何板块筛选。
+#
+# 这里的做法是「事件驱动 + 分级取数」，空闲时零开销：
+#   1. 某个 symbol 第一次出现 → note_new_symbol() 只塞队列，不发请求
+#   2. 后台线程攒 6 秒（新币常常一次上好几个）后逐个归类
+#   3. 先查单币接口（约 0.5KB）；查不到标签（只有合约没有现货的币）才退到
+#      全量 exchangeInfo（约 1.1MB），且全量至少间隔 6 小时
+#   4. 归类结果写 cache/sectors.local.json，并广播给前端
+# --------------------------------------------------------------------------
+
+SECTORS_LOCAL = os.path.join(CACHE_DIR, "sectors.local.json")
+_sector_q = queue.Queue(maxsize=300)
+_sector_pending = set()          # 已排队/正在查的 base，防重复
+_sector_lock = threading.Lock()
+_sector_bulk_at = 0.0            # 上次全量 exchangeInfo 的时间
+SECTOR_BULK_GAP = 6 * 3600       # 全量刷新最小间隔
+SECTOR_RETRY_GAP = 30 * 60       # 归不上类的 base 多久后重试
+SECTOR_MAX_TRY = 3               # 查不到标签的最多试几次就放弃
+_sector_fails = {}               # base -> 已尝试次数
+_sector_skip = set()             # 放弃的 base（已下架的杠杆代币等），不再查
+# 单币查询是 IO 等待，串行查 186 个要 6 分钟；6 路并发压到 30 秒左右
+_sector_pool = concurrent.futures.ThreadPoolExecutor(
+    max_workers=6, thread_name_prefix="sector")
+_sector_unknown_tags = {}        # 币安标签 -> 出现次数（映射表没覆盖的）
+_sector_added = {}               # 运行时补录的 base -> keys（只这些写盘）
+
+
+def load_sectors_local():
+    try:
+        with open(SECTORS_LOCAL, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        add = d.get("map") or {}
+        if add:
+            SECTORS["map"].update(add)
+            _sector_added.update(add)
+            log("叠加运行时归类 %d 个币种" % len(add))
+        for b in (d.get("skip") or []):
+            _sector_skip.add(b)     # 上次已判定归不上类的，别再查
+    except Exception:           # noqa: BLE001
+        pass
+
+
+def save_sectors_local():
+    """只写运行时补录的增量 + 已放弃的名单
+
+    不写整张表：随包发布的 sectors.json 以后可能重新生成，
+    整表落盘会把新版内容盖成旧的。
+    """
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        tmp = SECTORS_LOCAL + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"v": 2, "map": _sector_added, "skip": sorted(_sector_skip),
+                       "ts": int(time.time())}, f,
+                      ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp, SECTORS_LOCAL)
+    except Exception as e:      # noqa: BLE001
+        log("归类结果写盘失败: %s" % e)
+
+
+def note_new_symbol(sym):
+    """WS 里第一次见到某个 symbol 时调用。只入队，不阻塞行情线程。"""
+    base, _ = split_symbol(sym)
+    if not base or base in STABLE_BASES:
+        return
+    with _sector_lock:
+        if base in SECTORS["map"] or base in _sector_pending or base in _sector_skip:
+            return
+        _sector_pending.add(base)
+    try:
+        _sector_q.put_nowait(base)
+    except queue.Full:
+        with _sector_lock:
+            _sector_pending.discard(base)
+
+
+def _fetch_spot_tags(base):
+    """单币查现货标签：约 0.5KB。返回 (板块 key 列表, 原始 tag 列表)"""
+    try:
+        status, body = https_via_socks(
+            "www.binance.com",
+            "/bapi/asset/v1/public/asset-service/product/get-products?symbol=%sUSDT" % base,
+            20)
+        if status != 200:
+            return [], []
+        rows = json.loads(body).get("data") or []
+        for r in rows:
+            if r.get("b") == base:
+                tags = r.get("tags") or []
+                return keys_from_tags(tags), tags
+    except Exception:           # noqa: BLE001
+        pass
+    return [], []
+
+
+def _fetch_futures_subtypes(bases):
+    """全量 exchangeInfo（约 1.1MB），只取需要的 base。"""
+    out = {}
+    try:
+        raw = json.loads(fapi_get("/fapi/v1/exchangeInfo", 40))
+        want = set(bases)
+        for s in raw.get("symbols", []):
+            b = s.get("baseAsset")
+            if b not in want:
+                continue
+            keys = keys_from_futures(s.get("underlyingSubType"), s.get("underlyingType"))
+            if keys:
+                out.setdefault(b, set()).update(keys)
+    except Exception as e:      # noqa: BLE001
+        log("拉 exchangeInfo 失败: %s" % e)
+    return {b: [k for k in SECTOR_ORDER if k in v] for b, v in out.items()}
+
+
+def classify_bases(bases):
+    """给一批 base 归类，返回 {base: [keys]}
+
+    精度说明：现货标签把 Layer1/Layer2 合成一个 `Layer1_Layer2`，
+    所以只拿到 `['L1']` 的结果是「不完整」而不是「错误」——
+    这类也排进全量检查，等合约的 underlyingSubType 补齐 L2，两者取并集。
+    """
+    global _sector_bulk_at
+    got, need_bulk = {}, []
+    dirty = False
+    # ex.map 保持顺序，6 路并发查单币标签
+    try:
+        fetched = list(_sector_pool.map(_fetch_spot_tags, bases))
+    except Exception:           # noqa: BLE001
+        fetched = [([], []) for _ in bases]
+    had_tags = set()
+    for base, (keys, tags) in zip(bases, fetched):
+        if keys:
+            got[base] = keys
+        if tags:
+            had_tags.add(base)
+        if not keys or keys == ["L1"]:
+            need_bulk.append(base)
+        # 有标签但一个都没映射上 → 币安用了我们还不认识的分类
+        for t in tags:
+            if t not in TAG_MAP:
+                _sector_unknown_tags[t] = _sector_unknown_tags.get(t, 0) + 1
+
+    if need_bulk and time.time() - _sector_bulk_at > SECTOR_BULK_GAP:
+        bulk = _fetch_futures_subtypes(need_bulk)
+        _sector_bulk_at = time.time()
+        for b, keys in bulk.items():
+            merged = set(got.get(b, [])) | set(keys)
+            got[b] = [k for k in SECTOR_ORDER if k in merged]
+
+    if got:
+        with _sector_lock:
+            SECTORS["map"].update(got)
+            _sector_added.update(got)
+        save_sectors_local()
+        brief = "、".join("%s(%s)" % (b, "/".join(SECTORS["labels"].get(k, k) for k in v))
+                          for b, v in list(got.items())[:4])
+        log("新币自动归类 %d 个：%s" % (len(got), brief))
+        try:
+            HUB.broadcast({"t": "sec", "d": got})
+        except Exception:       # noqa: BLE001
+            pass
+
+    with _sector_lock:
+        for b in bases:
+            _sector_pending.discard(b)
+            if b in got:
+                _sector_fails.pop(b, None)
+            elif b in had_tags:
+                # 币安给了标签、但没一个属于我们这 13 个板块（比如 Payments / fan_token），
+                # 这类是「确定没有板块」，直接放弃，不用再试
+                _sector_skip.add(b)
+                _sector_fails.pop(b, None)
+                dirty = True
+            else:
+                # 完全没标签（已下架的杠杆代币、只有币本位合约等），留到慢扫描再试；
+                # 试满 SECTOR_MAX_TRY 次放弃，否则每 30 分钟白查一次
+                n = _sector_fails.get(b, 0) + 1
+                _sector_fails[b] = n
+                if n >= SECTOR_MAX_TRY:
+                    _sector_skip.add(b)
+                    _sector_fails.pop(b, None)
+                    dirty = True
+    if dirty:
+        save_sectors_local()
+    return got
+
+
+def sector_sync_worker():
+    """事件驱动：有新 base 才动，攒 6 秒批量处理"""
+    while True:
+        try:
+            first = _sector_q.get(timeout=60)
+        except queue.Empty:
+            continue
+        batch = [first]
+        time.sleep(6)               # 新币常成批上线，等一下凑一起查
+        while True:
+            try:
+                batch.append(_sector_q.get_nowait())
+            except queue.Empty:
+                break
+        try:
+            classify_bases(list(dict.fromkeys(batch)))
+        except Exception as e:      # noqa: BLE001
+            log("新币归类出错: %s" % e)
+
+
+def sector_sweep_worker():
+    """慢扫描：每 30 分钟看一眼还有没有没归类的，没有就什么都不做（零请求）"""
+    time.sleep(90)
+    while True:
+        try:
+            with _sector_lock:
+                pend = set(_sector_pending)
+            with HUB.lock:
+                syms = [x for x in HUB.tickers if "@" not in x]
+            todo = []
+            for sym in syms:
+                base, _ = split_symbol(sym)
+                if (base and base not in SECTORS["map"]
+                        and base not in pend and base not in _sector_skip):
+                    todo.append(base)
+            todo = list(dict.fromkeys(todo))
+            if todo:
+                log("扫描到 %d 个未归类币种，开始补" % len(todo))
+                for i in range(0, len(todo), 40):
+                    # 用户在操作时让路：这和 K 线预取抢的是同一个代理，
+                    # 后台补分类不该把首屏/切币的请求挤慢
+                    while time.time() - LAST_USER_REQ < 2.0:
+                        time.sleep(0.5)
+                    classify_bases(todo[i:i + 40])
+                    time.sleep(1)
+                left = sum(1 for b in todo
+                           if b not in SECTORS["map"] and b not in _sector_skip)
+                log("归类扫描结束：补上 %d 个，%d 个确实不属于任何板块"
+                    % (len(todo) - left, left))
+                if _sector_unknown_tags:
+                    # 币安新增了分类维度时，这里会冒出新标签 —— 提醒去补 TAG_MAP
+                    top = sorted(_sector_unknown_tags.items(), key=lambda kv: -kv[1])[:8]
+                    log("未映射的币安标签（可加进 sector_rules.TAG_MAP）：%s"
+                        % "、".join("%s×%d" % (t, n) for t, n in top))
+                    _sector_unknown_tags.clear()
+        except Exception as e:      # noqa: BLE001
+            log("归类扫描出错: %s" % e)
+        time.sleep(SECTOR_RETRY_GAP)
 
 
 def load_listing():
@@ -769,6 +1027,7 @@ class Hub:
             dp = price_dp(last_s)
             if old and old.get("dp", 0) > dp:
                 dp = old["dp"]
+            is_new = old is None
             self.tickers[key] = {
                 "l": last, "chgp": float(m.get("P") or 0),
                 "h": float(m["h"]), "lo": float(m["l"]),
@@ -778,6 +1037,8 @@ class Hub:
             self.dirty.add(key)
             self.msg_count += 1
             self.last_ws_msg = time.time()
+        if is_new:                  # 新合约第一次出现 → 排队补板块分类
+            note_new_symbol(key)
 
     # -- 涨速 ------------------------------------------------------------
     def speed(self, sym, price):
@@ -811,6 +1072,7 @@ class Hub:
             dp = price_dp(last_s)
             if old and old.get("dp", 0) > dp:
                 dp = old["dp"]
+            is_new = old is None
             self.tickers[sym] = {
                 "l": last, "chgp": chgp, "h": float(m["h"]), "lo": float(m["l"]),
                 "v": float(m["v"]), "qv": float(m["q"]), "o": op, "dp": dp, "ts": now,
@@ -818,6 +1080,8 @@ class Hub:
             self.dirty.add(sym)
             self.msg_count += 1
             self.last_ws_msg = now
+        if is_new:                  # 新币第一次出现 → 排队补板块分类
+            note_new_symbol(sym)
 
 
 class Client:
@@ -2277,6 +2541,8 @@ def build_server(host, port):
     StreamWorker(HUB).start()
     threading.Thread(target=push_loop, daemon=True).start()
     threading.Thread(target=listing_worker, daemon=True).start()
+    threading.Thread(target=sector_sync_worker, daemon=True).start()
+    threading.Thread(target=sector_sweep_worker, daemon=True).start()
     threading.Thread(target=bootstrap_market, daemon=True).start()
     if SOCKS_PROXY:
         threading.Thread(target=funding_worker, daemon=True).start()
