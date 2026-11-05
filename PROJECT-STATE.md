@@ -1534,7 +1534,67 @@ DSH 那台环境没有 `git.exe`，第 15~20 轮全是未提交的工作区改�
 
 ---
 
-## 交接：剩余工作（2026-11-05 17:30，从 DSH 切回 WorkBuddy）## 交接：剩余工作（2026-11-05 17:30，从 DSH 切回 WorkBuddy）
+## 2026-11-05 17:55 · 便携分发包（第 22 轮）
+
+用户要「给别的电脑解压就能用」的压缩包。
+
+### 先说结论：exe 本来就是自包含的
+
+PyInstaller onefile 把 Python 运行时、`index.html`、`assets/` 全塞进那一个 exe，
+窗口用的是 **Chrome/Edge 的 `--app` 模式**（不是 pywebview），
+所以目标机器**不需要装 Python**，有 Edge 就行（Win10/11 自带）。
+缓存和日志写 `%LOCALAPPDATA%\BinanceTerminal`，解压目录只读也能跑。
+
+实测：把 exe 单独复制到空目录、`BT_PORT=8899` 启动 → 1 秒出端口，
+首页 / 静态资源 / 行情流全部正常。
+
+### 唯一的真问题：合约要代理，而对方不会设环境变量
+
+原来只支持 `BINANCE_PROXY` 环境变量 + 自动探测常见端口。
+给别人用的话，代理端口不在那 7 个里就完全没辙。
+
+补了 **`proxy.txt`**：
+
+- 查找顺序：`sys.executable` 所在目录（exe 同目录）→ `%LOCALAPPDATA%\BinanceTerminal`
+- 一行 `host:port`，`#` 开头是注释，`utf-8-sig` 读（记事本存的 BOM 不影响）
+- 留空/全注释 → 退回原来的自动探测，行为不变
+
+**坑**：冻结后 `ROOT` 是 `sys._MEIPASS`（临时解包目录，只读且每次变），
+配置不能放那儿，必须用 `os.path.dirname(sys.executable)`。
+
+实测：把 `127.0.0.1:10808` 写进 exe 同目录的 `proxy.txt`，
+日志打「使用配置文件 C://...//pkgtest//proxy.txt 指定的代理 127.0.0.1:10808」，合约流 ok。
+
+### 打包流程固化
+
+`python tools/pack.py`：构建 exe → 组装 `dist/package/币安看盘终端/` → 压 zip。
+`--skip-build` 复用现有 exe。文案模板放 `packaging/`（仓库里），
+不要改 `dist/package` 里的副本。
+
+两个编码细节：
+
+- **zip 用 Python `zipfile` 写**，会给中文名打 UTF-8 标志位（`flag_bits & 0x800`），
+  资源管理器解压不乱码。用 GBK 的老压缩包在别人机器上会变问号。
+- `使用说明.txt` 存成 **UTF-8 + BOM + CRLF**（老记事本才不会把中文认成 GBK）；
+  `设置代理.bat` 存成 **UTF-8 无 BOM**（配合 `chcp 65001`，和仓库里已有的 bat 一致）。
+
+### 产物
+
+`dist/币安看盘终端_2026-11-05.zip`，8.33 MB，内含：
+
+| 文件 | 说明 |
+|---|---|
+| `BinanceTerminal.exe` | 8.5 MB，主程序 |
+| `使用说明.txt` | 运行要求 / 代理 / 数据目录 / 常见问题 |
+| `设置代理.bat` | 交互式写 proxy.txt |
+| `proxy.txt` | 模板（全注释） |
+
+验证：解压到**含空格和中文的路径**（`D://WorkBuddy AI\...\币安看盘终端`）→
+1 秒出端口、页面正常、1867 个交易对、`fut: ok`。
+
+---
+
+## 交接：剩余工作（2026-11-05 17:30，从 DSH 切回 WorkBuddy）## 交接：剩余工作（2026-11-05 17:30，从 DSH 切回 WorkBuddy）## 交接：剩余工作（2026-11-05 17:30，从 DSH 切回 WorkBuddy）
 
 这一段由 DeepSeek Harness 接手做了 6 轮（第 15~20 轮），**功能没加，全是性能、流畅度和观感**。
 现在切回 WorkBuddy 继续，先看这里。

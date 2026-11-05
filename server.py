@@ -126,20 +126,55 @@ def probe_fapi_direct():
     log("合约接口无法直连，继续走代理")
 
 
+def _proxy_config_files():
+    """代理配置文件的查找顺序：exe 同目录 → 用户数据目录
+
+    便携包给别人用时，让对方改 proxy.txt 比设环境变量现实得多。
+    """
+    dirs = []
+    if FROZEN:
+        # sys.executable 是 exe 本身；_MEIPASS 是临时解包目录，不能放配置
+        dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
+    else:
+        dirs.append(ROOT)
+    dirs.append(os.path.dirname(CACHE_DIR))      # %LOCALAPPDATA%\BinanceTerminal
+    return [os.path.join(d, "proxy.txt") for d in dirs]
+
+
+def _read_proxy_file():
+    for p in _proxy_config_files():
+        try:
+            with open(p, "r", encoding="utf-8-sig") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        return line, p
+        except Exception:       # noqa: BLE001
+            continue
+    return "", ""
+
+
 def detect_proxy():
     """探测本机常见代理端口，返回 (host, port) 或 None
 
-    想指定代理：设环境变量 BINANCE_PROXY=socks5://127.0.0.1:1080
-    （也接受 host:port，协议前缀会被忽略）
+    想指定代理，按优先级：
+      1. 环境变量 BINANCE_PROXY=socks5://127.0.0.1:1080（也接受 host:port）
+      2. exe 同目录或 %LOCALAPPDATA%/BinanceTerminal 下的 proxy.txt，
+         一行 host:port，# 开头是注释
+      3. 自动探测本机常见端口（10808 / 1080 / 7890 / 7891 / 10809 / 2080 / 20171）
     """
     global SOCKS_PROXY
     env = (os.environ.get("BINANCE_PROXY") or "").strip()
+    src = "环境变量 BINANCE_PROXY"
+    if not env:
+        env, src = _read_proxy_file()
+        src = "配置文件 " + src if src else ""
     if env:
         raw = env.split("://", 1)[-1]
         host, _, port = raw.rpartition(":")
         if host and port.isdigit():
             SOCKS_PROXY = (host, int(port))
-            log("使用环境变量指定的代理 %s:%s" % SOCKS_PROXY)
+            log("使用%s 指定的代理 %s:%s" % (src, SOCKS_PROXY[0], SOCKS_PROXY[1]))
             return SOCKS_PROXY
         log("BINANCE_PROXY 格式不对（要 host:port），忽略")
     for port in (10808, 1080, 7890, 7891, 10809, 2080, 20171):

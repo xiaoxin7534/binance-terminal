@@ -20,10 +20,20 @@
 
 重新打包（改完代码后）：双击 **`打包exe.bat`**，产物在 `dist\`。
 
+要给别的电脑用，打便携压缩包：
+
+```bash
+python tools/pack.py               # 构建 exe + 组装目录 + 压成 zip
+python tools/pack.py --skip-build  # 复用现有 exe，只重打包
+```
+
+产物 `dist\币安看盘终端_YYYY-MM-DD.zip`，对方解压后双击 `BinanceTerminal.exe` 就能用。
+说明文档和代理模板在 `packaging/`，改文案改那里（打包会覆盖 dist 里的副本）。
+
 改完代码建议先跑一遍回归（服务要先开着）：
 
 ```bash
-node tools/e2e.mjs          # 24 个用例，约 2 分钟
+node tools/e2e.mjs          # 25 个用例，约 2 分钟
 node tools/e2e.mjs bigchart # 只跑名字里带 bigchart 的
 node tools/perf.mjs         # 量耗时与流畅度：首屏 / 切周期 / 列表滚动 / 长任务
 node tools/startup.mjs      # 量桌面版启动：双击 exe → 端口可用 / 窗口 / 页面连上
