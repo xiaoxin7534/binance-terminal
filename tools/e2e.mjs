@@ -693,6 +693,57 @@ test('自选：一键清空 + 撤销', async (s) => {
   assertEq(r.after.join(','), r.before.join(','), '撤销没恢复成原来的自选');
 });
 
+test('列表行高：三档切换，CSS 变量与虚拟滚动同步', async (s) => {
+  await s.ev(`document.querySelector('#tabs button[data-view="list"]').click(); return 1;`);
+  await new Promise((r) => setTimeout(r, 900));
+
+  const probe = `
+    const rows = [...document.querySelectorAll('#tbody-inner .row')];
+    const tops = rows.map(e => Math.round(e.getBoundingClientRect().top));
+    const gaps = [];
+    for (let i = 1; i < tops.length; i++) gaps.push(tops[i] - tops[i - 1]);
+    const L = window.__term.list;
+    return {
+      rowH: L.rowH,
+      stateRowH: window.__term.state.rowH,
+      cssVar: getComputedStyle(document.documentElement).getPropertyValue('--row-h').trim(),
+      rowPx: rows.length ? Math.round(rows[0].getBoundingClientRect().height) : 0,
+      gapSet: [...new Set(gaps)],
+      innerH: Math.round(document.querySelector('#tbody-inner').getBoundingClientRect().height),
+      expectH: L.rows.length * L.rowH,
+      dense: document.querySelector('#view-list').dataset.dense || '',
+    };
+  `;
+
+  const pick = async (label) => {
+    await s.ev(`document.querySelector('#list-rowh-btn').click(); return 1;`);
+    await new Promise((r) => setTimeout(r, 300));
+    const ok = await s.ev(`
+      const items = [...document.querySelectorAll('.popover.menu .menu-item')];
+      const b = items.find(x => x.textContent.includes('${label}'));
+      if (b) b.click();
+      return !!b;
+    `);
+    await new Promise((r) => setTimeout(r, 500));
+    return ok;
+  };
+
+  const bad = [];
+  for (const [label, h] of [['紧凑', 26], ['宽松', 34], ['标准', 30]]) {
+    const found = await pick(label);
+    if (!found) { bad.push(`菜单里没有「${label}」`); continue; }
+    const r = await s.ev(probe);
+    if (r.rowH !== h) bad.push(`${label}: list.rowH=${r.rowH}，应为 ${h}`);
+    if (r.stateRowH !== h) bad.push(`${label}: state.rowH=${r.stateRowH}，应为 ${h}`);
+    if (r.cssVar !== h + 'px') bad.push(`${label}: --row-h=${r.cssVar}，应为 ${h}px`);
+    if (r.rowPx !== h) bad.push(`${label}: 实际行高 ${r.rowPx}px，应为 ${h}`);
+    if (r.gapSet.length !== 1 || r.gapSet[0] !== h) bad.push(`${label}: 行间距 ${JSON.stringify(r.gapSet)}，应为 ${h}`);
+    if (Math.abs(r.innerH - r.expectH) > 1) bad.push(`${label}: 滚动高度 ${r.innerH}，应为 ${r.expectH}`);
+    if ((h <= 27) !== (r.dense === '1')) bad.push(`${label}: dense 标记=${r.dense || '空'} 和行高不符`);
+  }
+  assert(!bad.length, bad.join('；'));
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();

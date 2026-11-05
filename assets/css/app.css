@@ -2348,3 +2348,8 @@ button,
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* 列表紧凑档（26px）：两行式币种名压一点字号，否则上下只剩 1px 余量 */
+.view-list[data-dense="1"] .sym-cell .nm { line-height: 1; }
+.view-list[data-dense="1"] .sym-cell .nm b { font-size: 11.5px; }
+.view-list[data-dense="1"] .sym-cell .nm i { font-size: 9px; letter-spacing: .2px; }

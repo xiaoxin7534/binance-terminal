@@ -606,6 +606,20 @@ function bindToolbar() {
 
   $('#list-detail-btn').addEventListener('click', () => setListDetail(!state.listDetailOpen));
 
+  // 列表行高：三档预设，菜单里标出当前那档
+  $('#list-rowh-btn').addEventListener('click', (e) => {
+    const cur = String(state.rowH || 30);
+    openMenu(e.currentTarget, [
+      { key: '26', label: '紧凑' },
+      { key: '30', label: '标准' },
+      { key: '34', label: '宽松' },
+    ], cur, (k) => {
+      state.rowH = Number(k);
+      save();
+      list.setRowH(state.rowH);
+    });
+  });
+
   $('#help-close').addEventListener('click', () => toggleHelp(false));
   $('#help').addEventListener('click', (e) => {
     if (e.target.id === 'help') toggleHelp(false);

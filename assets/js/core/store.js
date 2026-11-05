@@ -25,6 +25,7 @@ const DEFAULTS = {
   bcDetailOpen: true,  // 大图右侧盘口栏（默认打开）
   listDetailOpen: true, // 列表页右侧详情（默认打开）
   detailWidth: 0,       // 拖动调过的宽度，0 = 按 CSS 自适应
+  rowH: 30,             // 列表行高（px），和 CSS 的 --row-h 必须一致
   cells: DEFAULT_SYMBOLS.slice(0, 8),
   favs: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'],
   selected: 'BTCUSDT',
@@ -89,6 +90,7 @@ export function save() {
         gridSector: state.gridSector, colOrder: state.colOrder, sort: state.sort,
         alert: state.alert, uiV: 3,
         listDetailOpen: state.listDetailOpen, detailWidth: state.detailWidth,
+        rowH: state.rowH,
       }));
     } catch (e) { /* 隐私模式下忽略 */ }
   }, 250);

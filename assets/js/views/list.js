@@ -5,7 +5,8 @@ import {
 } from '../core/store.js';
 import { fmtPrice, fmtCompact, fmtPct, dirClass, fmtSigned, fmtFunding } from '../core/fmt.js';
 
-const ROW_H = 30;
+const ROW_H_MIN = 24;
+const ROW_H_MAX = 40;
 const THEAD_H = 34;
 const BUF = 8;
 
@@ -84,6 +85,9 @@ export class ListView {
     this.pool = new Map();
     this.range = [-1, -1];
     this.selected = state.selected;
+    // 行高可调：JS 里算虚拟滚动的行号，CSS 里算每行高度，两处必须用同一个数
+    this.rowH = Math.max(ROW_H_MIN, Math.min(ROW_H_MAX, Math.round(state.rowH || 30)));
+    this.applyRowH();
     this.colWidth = 0;
     this.dragging = false;
 
@@ -453,13 +457,32 @@ export class ListView {
       && next.length === this.rows.length
       && next.every((r, i) => r.s === this.rows[i].s);
     this.rows = next;
-    this.inner.style.height = (next.length * ROW_H) + 'px';
+    this.inner.style.height = (next.length * this.rowH) + 'px';
     if (!same) {
       this.range = [-1, -1];
       this.renderWindow(true);
     }
     this.updateCount();
     this.updateSectorChg();
+  }
+
+  /** 把行高同时落到 CSS 变量和虚拟滚动步长上——两处不一致就会错位 */
+  applyRowH() {
+    const v = this.rowH;
+    document.documentElement.style.setProperty('--row-h', v + 'px');
+    // 26px 时两行式币种名只剩 1px 余量，紧凑档把字号压一点，换回 3px 呼吸
+    this.root.dataset.dense = v <= 27 ? '1' : '';
+    if (this.inner) this.inner.style.height = (this.rows.length * v) + 'px';
+  }
+
+  /** 改行高：CSS 变量 + 虚拟滚动步长一起改，改完强制重画 */
+  setRowH(h) {
+    const v = Math.max(ROW_H_MIN, Math.min(ROW_H_MAX, Math.round(h)));
+    if (v === this.rowH) return;
+    this.rowH = v;
+    this.applyRowH();
+    this.range = [-1, -1];
+    this.renderWindow(true);
   }
 
   updateCount() {
@@ -474,8 +497,8 @@ export class ListView {
   renderWindow(force) {
     const st = Math.max(0, this.scroller.scrollTop - THEAD_H);
     const h = this.scroller.clientHeight || 400;
-    const start = Math.max(0, Math.floor(st / ROW_H) - BUF);
-    const end = Math.min(this.rows.length, Math.ceil((st + h) / ROW_H) + BUF);
+    const start = Math.max(0, Math.floor(st / this.rowH) - BUF);
+    const end = Math.min(this.rows.length, Math.ceil((st + h) / this.rowH) + BUF);
     // 已经渲染的窗口还盖得住新的可视区，就不重建。
     // 重建一次 = 几十行 DOM + 每行重算列宽，这是列表滚动掉帧的主要来源。
     if (!force && start >= this.range[0] && end <= this.range[1]) return;
@@ -536,7 +559,7 @@ export class ListView {
     const el = document.createElement('div');
     el.className = 'row' + (row.s === this.selected ? ' sel' : '');
     el.dataset.sym = row.s;
-    el.style.top = (i * ROW_H) + 'px';
+    el.style.top = (i * this.rowH) + 'px';
     const dp = row.dp ?? 2;
     const cls = dirClass(row.chgp);
     const amp = row.o ? ((row.h - row.lo) / row.o) * 100 : 0;
