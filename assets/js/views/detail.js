@@ -50,6 +50,36 @@ export class DetailPanel {
     this.symbol = null;      // 不清掉的话，下次 setSymbol 同一个币会 early-return
     this.lastDepth = null;
     this.lastDepthAt = 0;
+
+    // 元素引用必须跟着一起清。只清 `$` 的话 tradesEl 还是指向旧 DOM 的真值，
+    // 已经排进 rAF 的那帧 renderTrades 会照常进来，对着 null 的 `$` 调用 → TypeError。
+    // 实测触发路径：大图右侧面板开着、成交正高频推送时关面板 / 换币。
+    this.pxEl = null;
+    this.pctEl = null;
+    this.chartEl = null;
+    this.bookEl = null;
+    this.tradesEl = null;
+    this.flowEl = null;
+    this.buyBarEl = null;
+    this.trades = [];
+    this.sizes = [];
+    this.perp = null;
+    if (this.tradeRaf) {
+      cancelAnimationFrame(this.tradeRaf);
+      this.tradeRaf = 0;
+    }
+    // 延后请求和轮询也一并停掉：面板已经空了，再拉就是白打接口
+    clearTimeout(this.setTimer);       // 图表墙的 140ms 延迟换币，否则关掉面板又被它重建回来
+    this.setTimer = 0;
+    this.pendingSym = null;
+    this.pendTimers.forEach(clearTimeout);
+    this.pendTimers = [];
+    clearInterval(this.cdTimer);
+    clearInterval(this.perpTimer);
+    clearInterval(this.bookTimer);
+    this.cdTimer = 0;
+    this.perpTimer = 0;
+    this.bookTimer = 0;
   }
 
   /** 所在视图被隐藏时停止轮询（列表页和图表墙各有一块详情） */
@@ -600,7 +630,7 @@ export class DetailPanel {
   }
 
   renderTrades() {
-    if (!this.tradesEl) return;
+    if (!this.$ || !this.tradesEl) return;   // 面板已清空（见 renderEmpty 的注释）
     const dp = dpOf(this.symbol);
     const big = this.bigThreshold();
 

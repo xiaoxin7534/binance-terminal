@@ -1103,6 +1103,55 @@ test('列表行高：三档切换，CSS 变量与虚拟滚动同步', async (s) 
   assert(!bad.length, bad.join('；'));
 });
 
+test('详情面板：清空后残留的成交帧不再抛异常', async (s) => {
+  // 真实路径：大图右侧面板开着、成交正高频推送时关面板 / 换币 → renderEmpty()
+  // 已经把 `$` 置空，但那一帧已经排进 rAF 的 renderTrades 仍会执行。
+  await s.ev(`
+    document.querySelector('#tabs button[data-view="list"]').click();
+    await new Promise(r=>setTimeout(r,900));
+    const row = document.querySelector('#tbody-inner .row'); if (row) row.click();
+    await new Promise(r=>setTimeout(r,3200));
+    return 1;
+  `);
+  const before = s.errors.length;
+
+  const r = await s.ev(`
+    const dp = window.__term.detail;
+    const built = !!dp.tradesEl && typeof dp.$ === 'function';
+    // 一笔成交排进 rAF，同一帧内面板被清空——就是关面板那一瞬间的时序
+    dp.pushTrade({ s: dp.symbol, p: 1, q: 1, m: 0, T: Date.now() });
+    const rafQueued = dp.tradeRaf !== 0;
+    dp.renderEmpty();
+    await new Promise(r=>requestAnimationFrame(()=>setTimeout(r,120)));
+    return {
+      built, rafQueued,
+      raf: dp.tradeRaf, dollar: dp.$ === null,
+      tradesEl: dp.tradesEl === null, bookEl: dp.bookEl === null,
+      timers: [dp.cdTimer, dp.perpTimer, dp.bookTimer].filter(Boolean).length,
+      empty: !!dp.root.querySelector('.dt-empty'),
+    };
+  `);
+
+  assert(r.built, '详情面板没建起来，用例前提不成立');
+  assert(r.rafQueued, '没排出 rAF，复现路径不成立');
+  assertEq(r.raf, 0, '清空后 rAF 没取消');
+  assert(r.dollar, '清空后 $ 没置空');
+  assert(r.tradesEl, '清空后仍残留 tradesEl 引用（这正是异常来源）');
+  assert(r.bookEl, '清空后仍残留 bookEl 引用');
+  assertEq(r.timers, 0, '清空后定时器还在跑');
+  assert(r.empty, '清空后没有回到空状态');
+  assertEq(s.errors.length, before, '清空面板时抛出异常：\n  ' + s.errors.slice(before, before + 2).join('\n  '));
+
+  // 还原：后面的用例还要用这块面板
+  await s.ev(`
+    const row = document.querySelector('#tbody-inner .row'); if (row) row.click();
+    await new Promise(r=>setTimeout(r,2500));
+    return 1;
+  `);
+  const back = await s.ev('const dp = window.__term.detail; return { sym: dp.symbol, el: !!dp.tradesEl };');
+  assert(back.sym && back.el, '重新选中后详情面板没恢复');
+});
+
 /* ================================================================== 执行 */
 
 const server = await checkServer();

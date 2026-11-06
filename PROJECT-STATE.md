@@ -2077,3 +2077,66 @@ cell.js 里早有注释写过这件事（`schedulePaneHeights` 的 220ms + 80ms 
 
 「持仓量」用例也改了：原来断言固定 3 个窗格，现在 CVD 默认开着，改成断言
 「开 OI 后窗格 +1」「OI 落在最后一个窗格」「关掉后回到原样」。
+
+---
+
+## 2026-11-06 18:20 · 交接体检 + 详情面板清空竞态（第 30 轮）
+
+接手第一件事不是改代码，是先确认基线：服务拉起、`node tools/e2e.mjs` **32/32**、
+工作区干净（`334d896`，与 `origin/main` 一致）、exe 与源码同时间戳。
+然后翻 `cache/frontend-errors.log` —— 抓到一条**刚刚发生**的未捕获异常：
+
+```
+[2026-11-06 18:06:09] Uncaught TypeError: this.$ is not a function
+  at DetailPanel.renderTrades (detail.js:621)
+  at detail.js:588   ← pushTrade 里排进 rAF 的那一帧
+```
+
+### 根因：`renderEmpty()` 只清了 `$`，没清元素引用
+
+`renderEmpty()` 做了三件事：清空 `root.innerHTML`、`this.$ = null`、`this.symbol = null`。
+但 `tradesEl` / `bookEl` / `pxEl` / `flowEl` / `buyBarEl` **还指向已经被丢弃的旧 DOM**。
+
+`pushTrade()` 是「入队 + rAF 合并渲染」，所以存在这样的时序：
+
+1. 一笔成交进来 → 排进 `requestAnimationFrame`
+2. 同一帧内面板被清空（大图关右侧栏 `setDetail(false)`、或 `big.close()`）→ `$` 变 null
+3. 下一帧 rAF 照常执行 `renderTrades()` → 首行 `if (!this.tradesEl) return` **挡不住**
+   （旧引用是真值）→ 走到 `this.$('buyp')` → `null is not a function`
+
+高频成交的合约上很容易撞到：这解释了为什么日志里只有零星几条，却一直没被当成 bug。
+
+### 改了什么（`views/detail.js`）
+
+1. `renderEmpty()` 把 7 个元素引用一起置 null，清空 `trades` / `sizes` / `perp`。
+2. 取消待执行的 `tradeRaf`、`pendTimers`、`cdTimer` / `perpTimer` / `bookTimer`。
+3. **顺带修一个相邻的时序洞**：`clearTimeout(this.setTimer)` + `pendingSym = null`。
+   图表墙那块面板是 `delay: 140`，原来关掉面板后那个延迟换币的定时器还会把它重建回来。
+4. `renderTrades()` 首行加 `!this.$` 守卫，作为兜底（引用被别处清掉时不再抛）。
+
+清空后 `updateStats()`（守 `pxEl`）、`renderBook()`（守 `bookEl`）、`renderPerp()`（守 `$`）
+的早退逻辑都因为引用被置空而自然生效，不需要各自再加判断。
+
+### 回归
+
+`33/33` 通过。新增「详情面板：清空后残留的成交帧不再抛异常」，
+按真实时序复现：`pushTrade()` 排进 rAF 后同一 tick 调 `renderEmpty()`，等两帧后断言
+`tradeRaf === 0`、`$`/`tradesEl`/`bookEl` 全为 null、三个定时器全停、回到 `.dt-empty`、
+且**期间没有新的 `Runtime.exceptionThrown`**。末尾重新选中一行，确认面板能恢复。
+
+**回退验证**：把 `detail.js` 单独 `git stash` 后跑这条用例会失败
+（「清空后仍残留 tradesEl 引用」），不是空转用例。
+
+### 另外确认的两件事
+
+- `grid.js:148` 那条历史报错（`reading 'mounted'`）已经不会复现：`to` 现在有
+  `Math.min(cells.length, ...)` 钳制，`from > to` 时循环不进入。保留结论备查。
+- 本轮全程 `frontend-errors.log` 无新增条目。
+
+exe 已重新打包（18:1x，`dist/BinanceTerminal.exe`）。
+
+### 给下一位的提醒
+
+`renderEmpty()` 这类「把视图打回空态」的函数，要按**一个对象的完整拆卸**来写：
+DOM、查询函数、元素引用、rAF、定时器、缓存数据，六样都要清。
+这次漏的是元素引用和 rAF，两者的组合刚好绕过所有 `if (!xxx) return` 守卫。
