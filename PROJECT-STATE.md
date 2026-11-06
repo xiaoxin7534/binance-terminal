@@ -2133,7 +2133,7 @@ cell.js 里早有注释写过这件事（`schedulePaneHeights` 的 220ms + 80ms 
   `Math.min(cells.length, ...)` 钳制，`from > to` 时循环不进入。保留结论备查。
 - 本轮全程 `frontend-errors.log` 无新增条目。
 
-exe 已重新打包（18:1x，`dist/BinanceTerminal.exe`）。
+exe 已重新打包（18:12，`dist/BinanceTerminal.exe`），提交 `1bac9bb`。
 
 ### 给下一位的提醒
 
