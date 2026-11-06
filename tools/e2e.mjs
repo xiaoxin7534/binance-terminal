@@ -7,14 +7,16 @@
  *   node tools/e2e.mjs --headed   显示浏览器窗口（调试用）
  *
  * 前提：本地服务已经跑起来（python server.py），默认 8848。
+ * 临时 Chrome profile 落在 D:/WorkBuddy AI/.cache（环境变量 BTERM_CACHE 可改），
+ * 不写系统临时目录——C 盘被堆过 921MB 遗留 profile。
  * 原理：起一个独立 user-data-dir 的 headless Chrome，用 CDP 驱动，
  *      直接在页面里做断言——不引入 puppeteer/playwright。
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { makeProfile, removeProfile } from './_tmp.mjs';
 
 const CDP_PORT = Number(process.env.E2E_CDP_PORT || 9444);
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:8848';
@@ -1152,15 +1154,114 @@ test('详情面板：清空后残留的成交帧不再抛异常', async (s) => {
   assert(back.sym && back.el, '重新选中后详情面板没恢复');
 });
 
-/* ================================================================== 执行 */
+test('指标参数：改 MA/EMA/BOLL/MACD 后重算并持久化', async (s) => {
+  await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,400));
+    // 前面的用例直接对单个格子调过 setInterval('5d')（state.interval 没变），
+    // 所以这里不能靠点周期按钮——那个按钮还是 on 的，点了会 early-return
+    window.__term.grid.setIntervalAll('1m');
+    await new Promise(r=>setTimeout(r,1200));
+    // 等第一格 K 线真的到位，否则算出来的均线是空的
+    for (let i=0;i<100;i++){
+      const c = window.__term.grid.cells[0];
+      if (c && c.maSeries && c.maSeries.length && c.times && c.times.length > 60) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
+    return 1;
+  `);
 
+  const before = await s.ev(`
+    const c = window.__term.grid.cells[0];
+    return { ma: c.maSeries.map(m=>m.p), bars: c.times.length, intraday: !!c.intraday };
+  `);
+  assert(!before.intraday, '第一格还在分时模式，用例前提不成立');
+  assert(before.bars > 60, 'K 线没加载，用例前提不成立');
+  assertEq(before.ma.join(','), '5,52,200,200', '默认均线周期不对');
+
+  // BOLL 默认关着，先打开才能验证它的周期真的生效
+  await s.ev(`
+    const b = document.querySelector('[data-ind="boll"]');
+    if (b && !b.classList.contains('on')) b.click();
+    await new Promise(r=>setTimeout(r,700));
+    return 1;
+  `);
+
+  const filled = await s.ev(`
+    document.querySelector('#ind-params-btn').click();
+    await new Promise(r=>setTimeout(r,160));
+    const pop = document.querySelector('.popover.params');
+    if (!pop) return { ok: false, why: '弹层没出来' };
+    const fields = ['ma0','ma1','ma2','ema','boll','bollMult','m0','m1','m2'];
+    const missing = fields.filter(k => !pop.querySelector('[data-f="'+k+'"]'));
+    if (missing.length) return { ok: false, why: '缺输入框 ' + missing.join(',') };
+    const set = (f,v) => { pop.querySelector('[data-f="'+f+'"]').value = v; };
+    set('ma0',7); set('ma1',30); set('ma2',120); set('ema',100);
+    set('boll',26); set('bollMult',2.5); set('m0',8); set('m1',21); set('m2',5);
+    pop.querySelector('[data-act="apply"]').click();
+    await new Promise(r=>setTimeout(r,700));
+    return { ok: true };
+  `);
+  assert(filled.ok, '参数弹层异常：' + filled.why);
+
+  const r = await s.ev(`
+    const c = window.__term.grid.cells[0];
+    const closes = c.closes, n = closes.length;
+    const mean = (k) => { let s=0; for (let i=n-k;i<n;i++) s+=closes[i]; return s/k; };
+    const saved = JSON.parse(localStorage.getItem('binance-terminal.v1')||'{}');
+    return {
+      p: window.__term.state.indParams,
+      maP: c.maSeries.map(m=>m.p),
+      ma7: c.maSeries[0].vals[n-1], mean7: mean(7),
+      bollMid: c.bollSeries[1].vals[n-1], mean26: mean(26),
+      legend: c.legendEl.textContent.replace(/\\s+/g,' ').trim(),
+      mlegend: c.mlegendEl ? c.mlegendEl.textContent.replace(/\\s+/g,' ').trim() : '',
+      saved: saved.indParams || null,
+      popLeft: !!document.querySelector('.popover.params'),
+    };
+  `);
+
+  assertEq((r.p.ma || []).join(','), '7,30,120', 'state.indParams.ma 没更新');
+  assertEq(r.p.ema, 100, 'state.indParams.ema 没更新');
+  assertEq(r.p.boll, 26, 'state.indParams.boll 没更新');
+  assertEq(r.p.bollMult, 2.5, 'state.indParams.bollMult 没更新');
+  assertEq((r.p.macd || []).join(','), '8,21,5', 'state.indParams.macd 没更新');
+  assertEq(r.maP.join(','), '7,30,120,100', '均线序列的周期没跟着换');
+  assert(Math.abs(r.ma7 - r.mean7) < 1e-6, `MA7 数值不对：${r.ma7} vs 手算 ${r.mean7}`);
+  assert(Math.abs(r.bollMid - r.mean26) < 1e-6, `BOLL 中轨不对：${r.bollMid} vs 手算 ${r.mean26}`);
+  assert(r.legend.includes('MA7') && r.legend.includes('MA30') && r.legend.includes('MA120'),
+    '图例没跟着改：' + r.legend);
+  assert(r.legend.includes('EMA100'), '图例 EMA 没跟着改：' + r.legend);
+  assert(r.mlegend.includes('MACD 8,21,5'), 'MACD 图例参数没跟着改：' + r.mlegend);
+  assert(r.saved && (r.saved.macd || []).join(',') === '8,21,5', '参数没写进 localStorage');
+  assert(!r.popLeft, '应用后弹层没收起');
+
+  // 还原：恢复默认 + 关掉 BOLL，别影响后面的用例
+  await s.ev(`
+    document.querySelector('#ind-params-btn').click();
+    await new Promise(r=>setTimeout(r,160));
+    document.querySelector('.popover.params [data-act="reset"]').click();
+    await new Promise(r=>setTimeout(r,120));
+    document.querySelector('.popover.params [data-act="apply"]').click();
+    await new Promise(r=>setTimeout(r,500));
+    const b = document.querySelector('[data-ind="boll"]');
+    if (b && b.classList.contains('on')) b.click();
+    await new Promise(r=>setTimeout(r,500));
+    return 1;
+  `);
+  const back = await s.ev('const p = window.__term.state.indParams; return { ma: p.ma.join(","), macd: p.macd.join(",") };');
+  assertEq(back.ma, '5,52,200', '恢复默认后均线周期不对');
+  assertEq(back.macd, '12,26,9', '恢复默认后 MACD 参数不对');
+});
+
+/* ================================================================== 执行 */
 const server = await checkServer();
 const bin = findChrome();
-const profile = mkdtempSync(join(tmpdir(), 'bterm-e2e-'));
+const profile = makeProfile('e2e-');
 let chrome = null;
 let ws = null;
 
-const cleanup = () => {
+const cleanup = async () => {
   try { ws && ws.close(); } catch (e) { /* ignore */ }
   if (chrome && !chrome.killed) {
     if (process.platform === 'win32') {
@@ -1169,7 +1270,7 @@ const cleanup = () => {
       chrome.kill('SIGKILL');
     }
   }
-  setTimeout(() => { try { rmSync(profile, { recursive: true, force: true }); } catch (e) { /* ignore */ } }, 800);
+  await removeProfile(profile);
 };
 
 process.on('SIGINT', () => { cleanup(); process.exit(130); });
@@ -1212,7 +1313,7 @@ try {
   failed++;
   console.error(C.red('\n[E2E] 执行失败：' + (e.message || e)));
 } finally {
-  cleanup();
+  await cleanup();
 }
 
 const total = cases.filter((c) => !FILTER || c.name.includes(FILTER)).length;

@@ -19,12 +19,35 @@ const IV_LABEL = {
 };
 /** 分时用 1 分钟数据算，但订阅要落回 1m 流 */
 export const wsInterval = (iv) => (iv === 'time' ? '1m' : iv === '5d' ? '5m' : iv);
-const MA_DEFS = [
-  { p: 5, cls: 'lg-ma5', color: '#e8a33d', type: 'sma' },
-  { p: 52, cls: 'lg-ma52', color: '#3b82f6', type: 'sma' },
-  { p: 200, cls: 'lg-ma200', color: '#a855f7', type: 'sma' },
-  { p: 200, cls: 'lg-ema200', color: '#f43f5e', type: 'ema', style: 2 },
+/* 均线槽位：配色与线型按位置固定，周期由 state.indParams 决定（用户可调） */
+const MA_SLOTS = [
+  { cls: 'lg-ma5', color: '#e8a33d', type: 'sma' },
+  { cls: 'lg-ma52', color: '#3b82f6', type: 'sma' },
+  { cls: 'lg-ma200', color: '#a855f7', type: 'sma' },
+  { cls: 'lg-ema200', color: '#f43f5e', type: 'ema', style: 2 },
 ];
+const MA_FALLBACK = [5, 52, 200];
+
+/** 当前参数下的四条均线。CSS 类名只负责配色，所以不跟着周期改名 */
+function maDefs() {
+  const p = state.indParams || {};
+  const ma = Array.isArray(p.ma) ? p.ma : MA_FALLBACK;
+  return MA_SLOTS.map((d, i) => ({
+    ...d,
+    p: d.type === 'ema' ? (p.ema || 200) : (ma[i] || MA_FALLBACK[i]),
+  }));
+}
+
+/** 指标参数（带兜底，坏值不应该让整面墙画不出来） */
+function indParams() {
+  const p = state.indParams || {};
+  const m = Array.isArray(p.macd) ? p.macd : [];
+  return {
+    boll: p.boll || 20,
+    bollMult: p.bollMult || 2,
+    macd: [m[0] || 12, m[1] || 26, m[2] || 9],
+  };
+}
 const MACD_H = 72;
 const BAR_LIMIT = 500;
 
@@ -422,7 +445,7 @@ export class Cell {
 
     if (!this.intraday) {
       // 均线
-      this.maSeries = MA_DEFS.map((d) => ({
+      this.maSeries = maDefs().map((d) => ({
         ...d,
         vals: [],
         series: this.chart.addSeries(LC.LineSeries, {
@@ -960,14 +983,18 @@ export class Cell {
     const times = this.times;
 
     if (ind.ma) {
-      for (const m of this.maSeries) {
+      // 参数可能刚被改过，周期要跟着更新（序列本身按位置复用，不重建）
+      const defs = maDefs();
+      this.maSeries.forEach((m, k) => {
+        m.p = defs[k].p;
         m.vals = m.type === 'ema' ? ema(closes, m.p) : sma(closes, m.p);
         m.series.applyOptions({ visible: true });
         m.series.setData(toLine(times, m.vals));
-      }
+      });
     }
     if (ind.boll) {
-      const b = boll(closes, 20, 2);
+      const P = indParams();
+      const b = boll(closes, P.boll, P.bollMult);
       for (const s of this.bollSeries) {
         s.vals = b[s.key];
         s.series.applyOptions({ visible: true });
@@ -975,7 +1002,8 @@ export class Cell {
       }
     }
     if (ind.macd && this.macdHist) {
-      const m = macd(closes);
+      const [f, sl, g] = indParams().macd;
+      const m = macd(closes, f, sl, g);
       this.ind = m;
       const C = themeColors();
       this.macdHist.setData(m.hist.map((v, i) => ({
@@ -1066,7 +1094,8 @@ export class Cell {
       }
     }
     if (ind.boll) {
-      const b = lastBoll(closes, 20, 2);
+      const P = indParams();
+      const b = lastBoll(closes, P.boll, P.bollMult);
       if (b) {
         for (const s of this.bollSeries) {
           s.vals[i] = b[s.key];
@@ -1075,7 +1104,8 @@ export class Cell {
       }
     }
     if (ind.macd && this.macdHist) {
-      const m = macdLast(closes);
+      const [f, sl, g] = indParams().macd;
+      const m = macdLast(closes, f, sl, g);
       if (!this.ind) this.ind = { dif: [], dea: [], hist: [] };
       this.ind.dif[i] = m.dif;
       this.ind.dea[i] = m.dea;
@@ -1145,8 +1175,9 @@ export class Cell {
       const dif = this.ind.dif && this.ind.dif[i];
       const dea = this.ind.dea && this.ind.dea[i];
       const hist = this.ind.hist && this.ind.hist[i];
+      const [mf, ms, mg] = indParams().macd;
       this.mlegendEl.innerHTML =
-        `<span class="lg-macd lg-param">MACD 12,26,9</span>` +
+        `<span class="lg-macd lg-param">MACD ${mf},${ms},${mg}</span>` +
         `<span class="lg-macd lg-v">DIF <b>${dif == null ? '--' : dif.toFixed(mdp)}</b></span>` +
         `<span class="lg-macd lg-v">DEA <b>${dea == null ? '--' : dea.toFixed(mdp)}</b></span>` +
         `<span class="lg-macd lg-v">MACD <b class="${dirClass(hist)}">${hist == null ? '--' : hist.toFixed(mdp)}</b></span>`;

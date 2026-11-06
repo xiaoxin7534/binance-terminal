@@ -12,6 +12,15 @@ export const TAPE_SYMBOLS = [
   'DOGEUSDT', 'SUIUSDT', 'AVAXUSDT',
 ];
 
+/** 指标参数默认值（「恢复默认」用，也让 cell.js 有单一事实来源） */
+export const IND_DEFAULTS = Object.freeze({
+  ma: [5, 52, 200],
+  ema: 200,
+  boll: 20,
+  bollMult: 2,
+  macd: [12, 26, 9],
+});
+
 const DEFAULTS = {
   view: 'grid',
   theme: 'light',
@@ -21,6 +30,8 @@ const DEFAULTS = {
   rows: 0,             // 0=跟随布局行数，N=固定 N 行，-1=铺满当前筛选的全部品种
   interval: '1m',
   indicators: { ma: true, vol: true, macd: true, boll: false },
+  // 指标参数：三条 SMA + 一条 EMA、BOLL 周期/倍数、MACD 快慢信号
+  indParams: { ...IND_DEFAULTS, ma: [...IND_DEFAULTS.ma], macd: [...IND_DEFAULTS.macd] },
   sync: true,
   detailOpen: true,    // 多品种同列右侧详情侧板（默认打开）
   bcDetailOpen: true,  // 大图右侧盘口栏（默认打开）
@@ -68,6 +79,7 @@ function load() {
     return {
       ...DEFAULTS, ...saved,
       indicators: { ...DEFAULTS.indicators, ...(saved.indicators || {}) },
+      indParams: { ...DEFAULTS.indParams, ...(saved.indParams || {}) },
       sort: { ...DEFAULTS.sort, ...(saved.sort || {}) },
       cells: Array.isArray(saved.cells) && saved.cells.length ? saved.cells : [...DEFAULTS.cells],
       favs: Array.isArray(saved.favs) ? saved.favs : [...DEFAULTS.favs],
@@ -89,6 +101,7 @@ export function save() {
         watchOpen: state.watchOpen,
         layout: state.layout, rows: state.rows,
         interval: state.interval, indicators: state.indicators,
+        indParams: state.indParams,
         sync: state.sync, cells: state.cells, favs: state.favs,
         detailOpen: state.detailOpen,
         selected: state.selected, mkt: state.mkt, tab: state.tab, sector: state.sector,

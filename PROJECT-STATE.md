@@ -2140,3 +2140,85 @@ exe 已重新打包（18:12，`dist/BinanceTerminal.exe`），提交 `1bac9bb`�
 `renderEmpty()` 这类「把视图打回空态」的函数，要按**一个对象的完整拆卸**来写：
 DOM、查询函数、元素引用、rAF、定时器、缓存数据，六样都要清。
 这次漏的是元素引用和 rAF，两者的组合刚好绕过所有 `if (!xxx) return` 守卫。
+
+---
+
+## 2026-11-06 18:35 · 指标参数可调（第 31 轮）
+
+指标周期一直是写死的（`MA_DEFS` 常量 + `boll(closes,20,2)` + `macd(closes)`），
+用户想改就得改代码。这一轮做成可调。
+
+### 状态与持久化
+
+`state.indParams = { ma:[5,52,200], ema:200, boll:20, bollMult:2, macd:[12,26,9] }`，
+默认值抽成 `IND_DEFAULTS`（`store.js` 导出，冻结），`load()` 里浅合并、`save()` 里落盘。
+老用户 localStorage 没有这个字段 → 合并时自动补默认值，不用写迁移分支。
+
+### 数据层（`views/cell.js`）
+
+- `MA_DEFS` 常量 → `maDefs()` 函数：**4 个槽位的配色/线型固定，周期从参数表取**。
+  CSS 类名（`lg-ma5` 等）保持原样，它们只负责给图例上色，不跟着周期改名。
+- `recalcIndicators()` 里顺手把 `m.p = defs[k].p` 同步到已有序列——
+  **序列按位置复用，不重建图表**，改参数不会闪一下。
+- BOLL / MACD 的整段计算和实时 `updateTail()` 都改读 `indParams()`，带兜底：
+  坏值（空、0、字符串）回落到默认周期，不能让一面墙画不出来。
+- MACD 图例从写死的 `MACD 12,26,9` 改成读参数。
+
+### 交互
+
+工具栏「指标」组末尾加一个「参数」按钮 → `picker.js` 的 `openParams()`：
+9 个数字框（MA×3、EMA、BOLL 周期/倍数、MACD×3）+「恢复默认」+「应用」。
+**改完点应用才生效**——边输入边重算会让整面墙每敲一个字符就重算一遍指标。
+回车等于应用，Esc 关闭，外部点击关闭（复用 picker 的 `outside` 逻辑）。
+
+应用后：`state.indParams` 换新 → `save()` → `grid.setIndicators()` 重算已挂载的格子
+→ 逐格 `renderLegend()`（周期变了图例文字要跟着变）→ 大图打开时也重算一次。
+
+### 排版
+
+第一版输入框用 `flex:1` 均分，结果每行框宽都不一样（MA 三个窄、BOLL 两个宽），扫视时跳。
+改成 `grid-template-columns: 104px 1fr` + `grid-auto-columns: 54px`：
+标签列固定宽、输入框定宽左对齐，三行之间完全对齐。顺手去掉 number 的微调箭头
+（`appearance: textfield`），否则数字被箭头挤得贴边。
+
+### 回归
+
+`34/34` 通过。新增「指标参数：改 MA/EMA/BOLL/MACD 后重算并持久化」：
+打开参数弹层 → 填 7/30/120、EMA100、BOLL(26,2.5)、MACD(8,21,5) → 应用，
+断言 `state.indParams` 五项、四条均线的 `p`、**MA7 末值等于手算 SMA(7)**、
+**BOLL 中轨等于手算 26 期均值**、图例文字（MA7/MA30/MA120/EMA100）、
+MACD 图例、localStorage 落盘、弹层收起；最后恢复默认并断言回到 5,52,200 / 12,26,9。
+
+**踩的坑（用例层面）**：全量跑时这条用例失败，单跑却通过。
+原因是前面的「5 日连续分时」用例直接对单个格子调了 `setInterval('5d')`，
+`state.interval` 没变，所以周期按钮仍是 on、点了会 early-return。
+改成 `grid.setIntervalAll('1m')` 强制归一，并断言 `!c.intraday` 作为前提。
+
+---
+
+## 2026-11-06 18:45 · 工具链：临时目录搬离 C 盘
+
+用户提醒：无头浏览器 / E2E 的缓存不要堆在 C 盘。
+
+**实测**：`%LOCALAPPDATA%\Temp` 里本项目遗留了 **25 个 Chrome profile，合计 921MB**。
+
+**根因**：三个脚本都用 `mkdtempSync(join(tmpdir(), ...))`（Windows 上就是 C 盘 Temp），
+而 e2e 的清理是 `setTimeout(rmSync, 800)` —— 后面紧跟 `process.exit()`，
+**定时器根本没机会执行**，于是每跑一次留一个 ~27MB 的 profile。
+
+**改法**：
+
+1. 新增 `tools/_tmp.mjs`：
+   - `cacheRoot()` → 默认 `D:/WorkBuddy AI/.cache`，`BTERM_CACHE` 环境变量可覆盖，
+     D 盘不可写才退回系统临时目录（并打印警告）。
+   - `makeProfile(prefix)` → 在缓存根下建独立 profile。
+   - `removeProfile(dir)` → 重试 12 次 × 200ms（Chrome 被 taskkill 后还会占文件一会儿）。
+   - `sweepOld()` → 每次启动清掉 6 小时前的残留 profile，兜住「进程被强杀」的情况。
+2. `e2e.mjs` / `perf.mjs` / `shots.mjs` 全部改用上面三个函数；
+   e2e 的 `cleanup()` 改成 async 并在 `finally` 里 `await`，**不再靠定时器**。
+3. 已清理 C 盘那 921MB。
+
+**验证**：跑完一轮后 `D:/WorkBuddy AI/.cache` 为空、C 盘 Temp 无新增。
+
+**教训**：`process.exit()` 之前的清理必须同步或 `await`，
+`setTimeout` 里做清理在脚本里等于没做——它不会报错，只会安静地漏。

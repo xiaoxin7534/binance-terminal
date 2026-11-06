@@ -9,12 +9,13 @@
  * 前提：本地服务已经跑起来（python server.py），默认 8848。
  * 和 e2e.mjs 的区别：e2e 断言「功能对不对」，perf 只量「有多慢」，不做断言。
  * 每次都用全新的 user-data-dir（没有 localStorage 缓存），量的是真实的冷启动。
+ * 临时 profile 落在 D:/WorkBuddy AI/.cache（BTERM_CACHE 可改），不占 C 盘。
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { makeProfile, removeProfile } from './_tmp.mjs';
 
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:8848';
 const CDP_PORT = Number(process.env.PERF_CDP_PORT || 9555);
@@ -132,7 +133,7 @@ async function until(s, expr, timeout = 60000, step = 50) {
 
 async function main() {
   const chrome = findChrome();
-  const profile = mkdtempSync(join(tmpdir(), 'bt-perf-'));
+  const profile = makeProfile('perf-');
   const proc = launchChrome(chrome, profile);
   try {
     await waitForCdp();
@@ -366,7 +367,7 @@ async function main() {
     if (!KEEP) {
       proc.kill();
       await sleep(300);
-      try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+      await removeProfile(profile);
     }
   }
   console.log('');

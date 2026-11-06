@@ -9,13 +9,14 @@
  *
  * 前提：本地服务已经跑起来（python server.py），默认 8848。
  * 默认 1600x900 视口 + 独立 user-data-dir，保证每次截图条件一致。
+ * 临时 profile 落在 D:/WorkBuddy AI/.cache（BTERM_CACHE 可改），不占 C 盘。
  * 想看别的宽度：SHOT_W=1366 SHOT_H=768 node tools/shots.mjs
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { makeProfile, removeProfile } from './_tmp.mjs';
 
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:8848';
 const W = Number(process.env.SHOT_W || 1600);
@@ -71,7 +72,7 @@ class Session {
 async function main() {
   if (!CHROME) throw new Error('没找到 Chrome / Edge');
   mkdirSync(OUT, { recursive: true });
-  const profile = mkdtempSync(join(tmpdir(), 'bt-shot-'));
+  const profile = makeProfile('shot-');
   const proc = spawn(CHROME, [
     HEADED ? `--window-size=${W},${H}` : '--headless=new',
     // 不能用 --disable-gpu：lightweight-charts 的多层 canvas 会截出黑块
@@ -175,7 +176,7 @@ async function main() {
   } finally {
     proc.kill();
     await sleep(300);
-    try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+    await removeProfile(profile);
   }
   console.log('');
 }

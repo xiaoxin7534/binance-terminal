@@ -5,9 +5,9 @@ import {
   state, market, seedMarket, applyTicks, applyFunding, onFrame, save,
   setSectorLabels, sectorLabels, setRegionLabels,
   matchTab, matchMkt, SECTOR_KEYS, TAB_KEYS, TAPE_SYMBOLS,
-  isFav, toggleFav,
+  isFav, toggleFav, IND_DEFAULTS,
 } from './core/store.js';
-import { openMenu } from './core/picker.js';
+import { openMenu, openParams } from './core/picker.js';
 import { fmtPrice, fmtPct, dirClass, fmtCompact } from './core/fmt.js';
 import { GridView } from './views/grid.js';
 import { ListView } from './views/list.js';
@@ -575,6 +575,24 @@ function markActive() {
 
 function bindToolbar() {
   $('#btn-watch').addEventListener('click', toggleWatch);
+
+  // 指标参数：整面墙 + 大图一起重算。序列按位置复用，只有周期变，不重建图表
+  $('#ind-params-btn').addEventListener('click', (e) => {
+    openParams(e.currentTarget, state.indParams, IND_DEFAULTS, (next) => {
+      state.indParams = next;
+      save();
+      grid.setIndicators();
+      for (const c of grid.cells) {
+        if (!c.mounted || c.intraday || !c.times || !c.times.length) continue;
+        c.renderLegend(c.times.length - 1);
+      }
+      if (big && big.isOpen() && big.cell && big.cell.times.length) {
+        big.cell.recalcIndicators();
+        big.cell.renderLegend(big.cell.times.length - 1);
+      }
+      toast('指标参数已更新');
+    });
+  });
 
   $('#layout-seg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-layout]');
