@@ -977,11 +977,41 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   padding: 2px 4px;
   height: 18px;
   align-items: center;
-  animation: rowIn .25s;
 }
 .trade-row span:nth-child(2) { text-align: right; color: var(--text-2); font-family: var(--mono); }
 .trade-row span:nth-child(3) { text-align: right; color: var(--muted); font-family: var(--mono); }
+/* 只有最上面那一行做入场动画：整表重建时给每行都挂动画会一直在闪 */
+.trade-row:first-child { animation: rowIn .25s; }
 @keyframes rowIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* 大单：成交额排进近 200 笔前 15% 的那些 */
+.trade-row.big { background: var(--panel-3); border-radius: 3px; }
+.trade-row.big span:nth-child(2) { color: var(--text); font-weight: 600; }
+
+/* 主动买 / 主动卖 汇总：把成交流水变成"谁在打" */
+.tflow { margin: 4px 0 8px; }
+.tflow-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--down-soft);
+  overflow: hidden;
+}
+.tflow-bar i {
+  display: block;
+  height: 100%;
+  width: 50%;
+  background: var(--up);
+  border-radius: 3px 0 0 3px;
+  transition: width .25s;
+}
+.tflow-legend {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.tflow-legend b { font-family: var(--mono); font-weight: 500; }
 
 .dt-empty {
   padding: 40px 20px;
@@ -1940,6 +1970,7 @@ kbd {
   color: var(--muted);
   opacity: .8;
 }
+.book-tag.on { color: var(--accent); opacity: 1; background: var(--accent-soft); border-radius: 4px; }
 /* 价格合并粒度：做成可点的下拉 */
 .book-step {
   cursor: pointer;

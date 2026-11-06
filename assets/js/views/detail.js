@@ -34,6 +34,9 @@ export class DetailPanel {
     this.bookTimer = 0;
     this.perp = null;
     this.trades = [];
+    this.sizes = [];          // 近 200 笔成交额，用来算大单线
+    this.onlyBig = false;
+    this.tradeRaf = 0;
     this.lastDepth = null;
     this.pendTimers = [];      // 延后发出的请求（切币时要取消）
     this.bookStep = 0;         // 盘口价格合并粒度，0 = 原始精度
@@ -89,6 +92,7 @@ export class DetailPanel {
     if (!sym || this.symbol === sym) return;
     this.symbol = sym;
     this.trades = [];
+    this.sizes = [];
     this.lastDepth = null;
     this.perp = null;
     this.perpTries = 0;
@@ -178,6 +182,7 @@ export class DetailPanel {
       if (sym !== this.symbol) return;
       const rows = (t.t || []).slice().reverse();
       this.trades = rows.map(([p, q, T, m]) => ({ s: sym, p, q, m, T }));
+      this.sizes = this.trades.map((x) => x.p * x.q);
       this.renderTrades();
     }).catch(() => { /* 网络抖动忽略 */ });
   }
@@ -283,8 +288,17 @@ export class DetailPanel {
         <div class="book" data-role="book"><div class="muted" style="padding:8px 4px">等待盘口数据…</div></div>
       </div>
       <div class="dt-section" style="border-bottom:none">
-        <h4>最近成交<span class="line"></span></h4>
-        <div class="trade-head"><span>价格</span><span>数量</span><span>时间</span></div>
+        <h4>最近成交<span class="line"></span><button class="book-tag book-step" data-role="bigonly"
+          title="只看大单：近 200 笔成交额排前 15% 的">大单</button></h4>
+        <div class="tflow" data-role="tflow" hidden title="近 30 笔成交里，主动买 / 主动卖各占多少成交额">
+          <div class="tflow-bar"><i data-role="buybar"></i></div>
+          <div class="tflow-legend">
+            <span class="up">主动买 <b data-role="buyp">--</b></span>
+            <span>净额 <b data-role="net">--</b></span>
+            <span class="down">主动卖 <b data-role="sellp">--</b></span>
+          </div>
+        </div>
+        <div class="trade-head"><span>价格</span><span>成交额</span><span>时间</span></div>
         <div class="trades" data-role="trades"><div class="muted" style="padding:6px 4px">等待成交…</div></div>
       </div>
       </div>
@@ -296,6 +310,8 @@ export class DetailPanel {
     this.chartEl = this.$('chart');
     this.bookEl = this.$('book');
     this.tradesEl = this.$('trades');
+    this.flowEl = this.$('tflow');
+    this.buyBarEl = this.$('buybar');
 
     this.root.querySelector('[data-role="fav"]').addEventListener('click', (e) => {
       toggleFav(this.symbol);
@@ -307,6 +323,17 @@ export class DetailPanel {
 
     const stepBtn = this.$('step');
     if (stepBtn) stepBtn.addEventListener('click', () => this.openStepMenu(stepBtn));
+
+    // 只看大单：把碎单滤掉，剩下的就是真正在扫盘的那几笔
+    const bigBtn = this.$('bigonly');
+    if (bigBtn) {
+      bigBtn.classList.toggle('on', this.onlyBig);
+      bigBtn.addEventListener('click', () => {
+        this.onlyBig = !this.onlyBig;
+        bigBtn.classList.toggle('on', this.onlyBig);
+        this.renderTrades();
+      });
+    }
 
     const closeBtn = this.root.querySelector('[data-role="close"]');
     if (closeBtn && this.opts.onClose) closeBtn.addEventListener('click', () => this.opts.onClose());
@@ -545,20 +572,77 @@ export class DetailPanel {
 
   onTrade(msg) {
     if (!msg || msg.s !== this.symbol) return;
-    this.trades.unshift(msg);
-    if (this.trades.length > 16) this.trades.pop();
-    this.renderTrades();
+    this.pushTrade(msg);
+  }
+
+  /** 收一笔成交：只入队，渲染合并到下一帧
+   *  逐笔重建 30 行 DOM 在高频合约上会把主线程占满，看盘反而卡 */
+  pushTrade(t) {
+    this.trades.unshift(t);
+    if (this.trades.length > 30) this.trades.length = 30;
+    this.sizes.push(t.p * t.q);
+    if (this.sizes.length > 200) this.sizes.shift();
+    if (this.tradeRaf) return;
+    this.tradeRaf = requestAnimationFrame(() => {
+      this.tradeRaf = 0;
+      this.renderTrades();
+    });
+  }
+
+  /** 大单线：近 200 笔成交额的 85 分位
+   *  绝对金额跨币种没法比（BTC 的 5 万 U 和某个小币的 5 万 U 不是一个量级），
+   *  用相对分位才能每个币都挑出"最显眼的那批" */
+  bigThreshold() {
+    const n = this.sizes.length;
+    if (n < 12) return Infinity;
+    const s = this.sizes.slice().sort((a, b) => a - b);
+    return s[Math.min(n - 1, Math.floor(n * 0.85))];
   }
 
   renderTrades() {
     if (!this.tradesEl) return;
     const dp = dpOf(this.symbol);
-    this.tradesEl.innerHTML = this.trades.map((t) => `
-      <div class="trade-row">
+    const big = this.bigThreshold();
+
+    // 主动买 / 主动卖：m=1 表示买方挂单（主动卖），m=0 表示主动买
+    let buy = 0;
+    let sell = 0;
+    for (const t of this.trades) {
+      const v = t.p * t.q;
+      if (t.m) sell += v;
+      else buy += v;
+    }
+    const total = buy + sell;
+    if (this.flowEl) {
+      this.flowEl.hidden = !total;
+      if (total) {
+        const bp = (buy / total) * 100;
+        this.buyBarEl.style.width = bp.toFixed(1) + '%';
+        this.$('buyp').textContent = bp.toFixed(0) + '%';
+        this.$('sellp').textContent = (100 - bp).toFixed(0) + '%';
+        const net = buy - sell;
+        const netEl = this.$('net');
+        netEl.textContent = (net >= 0 ? '+' : '-') + fmtCompact(Math.abs(net));
+        netEl.className = net >= 0 ? 'up' : 'down';
+      }
+    }
+
+    // 统计用满 30 笔，屏幕上只放 18 行：再长就只是噪音，而且会把整个侧栏顶下去
+    const rows = (this.onlyBig ? this.trades.filter((t) => t.p * t.q >= big) : this.trades)
+      .slice(0, 18);
+    if (!rows.length) {
+      this.tradesEl.innerHTML = `<div class="muted" style="padding:6px 4px">${
+        this.onlyBig ? '这一会儿没有大单' : '等待成交…'}</div>`;
+      return;
+    }
+    this.tradesEl.innerHTML = rows.map((t) => {
+      const v = t.p * t.q;
+      return `<div class="trade-row${v >= big ? ' big' : ''}"
+        title="${t.m ? '主动卖' : '主动买'} ${fmtQty(t.q)} · ${fmtCompact(v)} USDT">
         <span class="${t.m ? 'down' : 'up'}">${fmtPrice(t.p, dp)}</span>
-        <span>${fmtQty(t.q)}</span>
-        <span>${clockTime(t.T)}</span>
-      </div>`).join('');
+        <span>${fmtCompact(v)}</span>
+        <span>${clockTime(t.T)}</span></div>`;
+    }).join('');
   }
 
   updateTick() {

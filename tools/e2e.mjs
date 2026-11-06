@@ -758,6 +758,55 @@ test('股票市场细分：菜单与筛选', async (s) => {
   assertEq(await s.ev('return window.__term.state.region;'), null, '用例结束没复位 region');
 });
 
+test('最近成交：主动买卖汇总 + 只看大单', async (s) => {
+  await s.ev(`document.querySelector('#tabs button[data-view="list"]').click(); await new Promise(r=>setTimeout(r,900));
+    const row = document.querySelector('.tbody-inner .row'); if (row) row.click();
+    await new Promise(r=>setTimeout(r,3200)); return 1;`);
+  const r = await s.ev(`
+    const d = document.querySelector('#detail');
+    const rows = [...d.querySelectorAll('.trades .trade-row')];
+    const flow = d.querySelector('.tflow');
+    return {
+      n: rows.length,
+      flowHidden: !flow || flow.hidden,
+      bp: d.querySelector('[data-role="buyp"]').textContent,
+      sp: d.querySelector('[data-role="sellp"]').textContent,
+      net: d.querySelector('[data-role="net"]').textContent,
+      barW: d.querySelector('[data-role="buybar"]').style.width,
+      cols: rows[0] ? rows[0].children.length : 0,
+      head: [...d.querySelectorAll('.trade-head span')].map(x => x.textContent).join('/'),
+      tip: rows[0] ? rows[0].getAttribute('title') : '',
+    };
+  `);
+  assert(!r.flowHidden, '主动买卖汇总条没显示');
+  assert(r.n > 3 && r.n <= 18, '成交行数异常：' + r.n);
+  assertEq(r.cols, 3, '成交行不是 3 列');
+  assertEq(r.head, '价格/成交额/时间', '列头没改成成交额：' + r.head);
+  assert(/%$/.test(r.bp) && /%$/.test(r.sp), '买卖占比格式不对：' + r.bp + '/' + r.sp);
+  assert(Math.abs(parseInt(r.bp, 10) + parseInt(r.sp, 10) - 100) <= 1,
+    '买卖占比加起来不是 100：' + r.bp + '+' + r.sp);
+  assert(/^[+-]/.test(r.net), '净额没带正负号：' + r.net);
+  assert(/%$/.test(r.barW), '比例条宽度没设：' + r.barW);
+  assert(/主动[买卖]/.test(r.tip) && /USDT/.test(r.tip), '成交行没有数量/金额提示：' + r.tip);
+
+  const b = await s.ev(`
+    const d = document.querySelector('#detail');
+    const btn = d.querySelector('[data-role="bigonly"]');
+    btn.click();
+    await new Promise(r=>setTimeout(r,350));
+    const rows = [...d.querySelectorAll('.trades .trade-row')];
+    const allBig = rows.every(x => x.classList.contains('big'));
+    const n = rows.length;
+    const on = btn.classList.contains('on');
+    btn.click();
+    await new Promise(r=>setTimeout(r,350));
+    return { n, allBig, on, back: d.querySelectorAll('.trades .trade-row').length };
+  `);
+  assert(b.on, '「大单」按钮没有高亮');
+  assert(b.allBig, '「只看大单」里混进了小单');
+  assert(b.back >= b.n, '取消大单过滤后行数没恢复');
+});
+
 test('资金费率柱：等宽对齐，负费率向下画', async (s) => {
   await s.ev(`document.querySelector('#tabs button[data-view="list"]').click(); await new Promise(r=>setTimeout(r,800));
     const row = document.querySelector('.tbody-inner .row'); if (row) row.click();
