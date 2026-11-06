@@ -849,6 +849,7 @@ async function boot() {
   });
   // 大图模式：双击品种进入，带绘图 + OHLC 明细
   big = new BigChart($('#bigchart'), {
+    toast: (m, a) => toast(m, a),
     onClose: () => syncSubs(),
     // 左右键翻品种：列表视图用列表当前的行顺序，否则用同列的筛选结果
     symbolList: () => (state.view === 'list' && list && list.symbols

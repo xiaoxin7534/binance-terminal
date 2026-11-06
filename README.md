@@ -459,4 +459,17 @@ binance-terminal/
 
 ---
 
+## 许可
+
+本项目代码以 **MIT** 许可发布，见 [`LICENSE`](LICENSE)。
+
+内置的 [TradingView Lightweight Charts™](https://github.com/tradingview/lightweight-charts)
+（`assets/js/vendor/`）使用 **Apache License 2.0**，许可证全文在
+[`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt)，说明见
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
+
+行情数据来自币安公开接口，本项目不分发任何行情数据，与币安无隶属关系。
+
+---
+
 *仅供个人看盘使用。行情有延迟，不构成任何投资建议。*

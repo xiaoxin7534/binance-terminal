@@ -766,7 +766,21 @@ test('股票市场细分：菜单与筛选', async (s) => {
 
 test('大图：CVD 默认打开且数值正确', async (s) => {
   await s.ev(`document.querySelector('#tabs button[data-view="grid"]').click(); await new Promise(r=>setTimeout(r,500));
-    window.__term.big.open('BTCUSDT@f','5m'); await new Promise(r=>setTimeout(r,4000)); return 1;`);
+    window.__term.big.open('BTCUSDT@f','5m');
+    // 固定等 4 秒不够稳：CVD 曲线要等 K 线挂载后才建，行情慢的时候会假失败
+    for (let i=0;i<120;i++){
+      const b = window.__term.big;
+      if (b.cvdSeries && b.cell && b.cell.bars && b.cell.bars.length > 10) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
+    // 副图高度是 220ms + 80ms 两段式设的，曲线建好不等于高度落定
+    for (let i=0;i<50;i++){
+      let h = -1;
+      try { h = window.__term.big.cell.chart.panes()[2].getHeight(); } catch (e) { h = -1; }
+      if (h >= 50 && h <= 110) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
+    return 1;`);
   const r = await s.ev(`
     const b = window.__term.big;
     const btn = document.querySelector('#bc-cvd-btn');
@@ -828,7 +842,14 @@ test('大图：CVD 默认打开且数值正确', async (s) => {
 test('最近成交：主动买卖汇总 + 只看大单', async (s) => {
   await s.ev(`document.querySelector('#tabs button[data-view="list"]').click(); await new Promise(r=>setTimeout(r,900));
     const row = document.querySelector('.tbody-inner .row'); if (row) row.click();
-    await new Promise(r=>setTimeout(r,3200)); return 1;`);
+    // 等成交真的到齐：汇总条要按近 30 笔算，成交慢的时候固定等待会假失败
+    for (let i=0;i<120;i++){
+      const flow = document.querySelector('#detail .tflow');
+      const rows = document.querySelectorAll('#detail .trades .trade-row');
+      if (flow && !flow.hidden && rows.length >= 5) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
+    return 1;`);
   const r = await s.ev(`
     const d = document.querySelector('#detail');
     const rows = [...d.querySelectorAll('.trades .trade-row')];
@@ -1572,8 +1593,8 @@ test('绘图工具栏：拆成两组，点击仍然生效', async (s) => {
     return { groups: groups.length, sizes, n: btns.length, onNow, w, h };
   `);
   assertEq(r.groups, 2, '绘图工具栏应该是两组');
-  assertEq(r.sizes.join(','), '5,2', '两组按钮数不对：' + r.sizes.join(','));
-  assertEq(r.n, 7, '绘图按钮总数不对：' + r.n);
+  assertEq(r.sizes.join(','), '8,2', '两组按钮数不对：' + r.sizes.join(','));
+  assertEq(r.n, 10, '绘图按钮总数不对：' + r.n);
   assert(r.onNow.includes('rect'), '点矩形后没有选中：' + r.onNow.join(','));
   assert(r.w >= 24 && r.h >= 21, `按钮太小：${r.w}×${r.h}`);
 
@@ -1685,6 +1706,140 @@ test('详情面板：清空时真的销毁图表（防库内部 Value is null）
   assert(r.empty, '没有回到空状态');
 
   await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,500)); return 1;`);
+});
+
+test('绘图：射线 / 水平射线 / 文本标注', async (s) => {
+  await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,300));
+    window.__term.big.open('BTCUSDT@f');
+    await new Promise(r=>setTimeout(r,2600));
+    const d = window.__term.big.draw;
+    d.items.length = 0;
+    d.persist();
+    d.schedule();
+    return 1;
+  `);
+
+  const clickAt = (x, y) => `
+    const host = window.__term.big.cell.host;
+    const r = host.getBoundingClientRect();
+    const mk = (type) => new PointerEvent(type, { bubbles:true, pointerId:1,
+      clientX: r.left + ${x}, clientY: r.top + ${y} });
+    host.dispatchEvent(mk('pointerdown'));
+    host.dispatchEvent(mk('pointerup'));
+  `;
+  const dragTo = (x1, y1, x2, y2) => `
+    const host = window.__term.big.cell.host;
+    const r = host.getBoundingClientRect();
+    const mk = (type, x, y) => new PointerEvent(type, { bubbles:true, pointerId:1,
+      clientX: r.left + x, clientY: r.top + y });
+    host.dispatchEvent(mk('pointerdown', ${x1}, ${y1}));
+    host.dispatchEvent(mk('pointermove', ${x2}, ${y2}));
+    host.dispatchEvent(mk('pointerup', ${x2}, ${y2}));
+  `;
+
+  // 1) 水平射线：点一下即可
+  const hray = await s.ev(`
+    window.__term.big.setTool('hray');
+    await new Promise(r=>setTimeout(r,150));
+    ${clickAt(320, 210)}
+    await new Promise(r=>setTimeout(r,250));
+    const it = window.__term.big.draw.items.slice(-1)[0];
+    return { n: window.__term.big.draw.items.length, type: it && it.type,
+             hasP1: !!(it && it.p1 && it.p1.t), tool: window.__term.big.draw.tool };
+  `);
+  assertEq(hray.n, 1, '水平射线没画上');
+  assertEq(hray.type, 'hray', '图元类型不是 hray：' + hray.type);
+  assert(hray.hasP1, '水平射线没有锚点');
+  assertEq(hray.tool, 'hray', '工具应该保持选中，方便连画');
+
+  // 2) 射线：拖两点
+  const ray = await s.ev(`
+    window.__term.big.setTool('ray');
+    await new Promise(r=>setTimeout(r,150));
+    ${dragTo(300, 260, 420, 180)}
+    await new Promise(r=>setTimeout(r,250));
+    const it = window.__term.big.draw.items.slice(-1)[0];
+    return { n: window.__term.big.draw.items.length, type: it && it.type,
+             p1: it && it.p1, p2: it && it.p2 };
+  `);
+  assertEq(ray.n, 2, '射线没画上');
+  assertEq(ray.type, 'ray', '图元类型不是 ray：' + ray.type);
+  assert(ray.p2 && ray.p2.t !== ray.p1.t, '射线两个点不该重合');
+
+  // 3) 文本：点一下弹输入框 → 确认后落地，工具自动回光标
+  const txt = await s.ev(`
+    window.__term.big.setTool('text');
+    await new Promise(r=>setTimeout(r,150));
+    ${clickAt(360, 300)}
+    await new Promise(r=>setTimeout(r,250));
+    const pop = document.querySelector('.popover.params');
+    if (!pop) return { ok:false, n: window.__term.big.draw.items.length };
+    const inp = pop.querySelector('[data-f="v"]');
+    inp.value = '这里放量';
+    pop.querySelector('[data-act="ok"]').click();
+    await new Promise(r=>setTimeout(r,350));
+    const it = window.__term.big.draw.items.slice(-1)[0];
+    return { ok:true, n: window.__term.big.draw.items.length, type: it && it.type,
+             text: it && it.text, tool: window.__term.big.draw.tool,
+             saved: (JSON.parse(localStorage.getItem('binance-terminal.drawings.v1')||'{}')) };
+  `);
+  assert(txt.ok, '文本工具没有弹出输入框');
+  assertEq(txt.n, 3, '文本没落地');
+  assertEq(txt.type, 'text', '图元类型不是 text：' + txt.type);
+  assertEq(txt.text, '这里放量', '文本内容不对：' + txt.text);
+  assertEq(txt.tool, null, '添加文本后应自动回到光标模式');
+  const savedSome = Object.values(txt.saved).some((arr) => Array.isArray(arr)
+    && arr.some((x) => x.type === 'text' && x.text === '这里放量'));
+  assert(savedSome, '文本没写进 localStorage');
+
+  // 4) 取消输入框：不应该留下图元
+  const cancel = await s.ev(`
+    window.__term.big.setTool('text');
+    await new Promise(r=>setTimeout(r,150));
+    ${clickAt(380, 320)}
+    await new Promise(r=>setTimeout(r,250));
+    const pop = document.querySelector('.popover.params');
+    if (!pop) return { ok:false };
+    pop.querySelector('[data-act="cancel"]').click();
+    await new Promise(r=>setTimeout(r,300));
+    return { ok:true, n: window.__term.big.draw.items.length };
+  `);
+  assert(cancel.ok, '第二次点文本没弹框');
+  assertEq(cancel.n, 3, '点取消后不该新增图元');
+
+  // 5) 光标模式点中水平射线 → Delete 删除
+  const del = await s.ev(`
+    window.__term.big.setTool('cursor');
+    await new Promise(r=>setTimeout(r,150));
+    const host = window.__term.big.cell.host;
+    const r = host.getBoundingClientRect();
+    const ev = (type, x, y) => new PointerEvent(type, { bubbles:true, pointerId:1,
+      clientX: r.left + x, clientY: r.top + y });
+    // 点在水平射线上（y=210，x 往右）
+    host.dispatchEvent(ev('pointerdown', 320, 210));
+    host.dispatchEvent(ev('pointerup', 320, 210));
+    host.dispatchEvent(new MouseEvent('click', { bubbles:true, clientX: r.left+320, clientY: r.top+210 }));
+    await new Promise(r=>setTimeout(r,200));
+    const sel = window.__term.big.draw.sel;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key:'Delete', bubbles:true }));
+    await new Promise(r=>setTimeout(r,250));
+    return { sel, n: window.__term.big.draw.items.length,
+             types: window.__term.big.draw.items.map(i=>i.type) };
+  `);
+  assert(del.sel >= 0, '光标模式没选中水平射线');
+  assertEq(del.n, 2, 'Delete 没删掉图元');
+  assert(!del.types.includes('hray'), '删错图元了：' + del.types.join(','));
+
+  // 收尾：清空这个品种的绘图
+  await s.ev(`
+    document.querySelector('#bc-draw button[data-tool="clear"]').click();
+    await new Promise(r=>setTimeout(r,300));
+    window.__term.big.close();
+    await new Promise(r=>setTimeout(r,400));
+    return 1;
+  `);
 });
 
 /* ================================================================== 执行 */

@@ -275,7 +275,10 @@ export function openPrompt(anchor, opts = {}) {
     </div>`;
   document.body.appendChild(pop);
 
-  const r = anchor.getBoundingClientRect();
+  // at 给了就贴着那个坐标弹（文本标注要出现在鼠标点的地方），否则贴在锚点元素下方
+  const r = opts.at
+    ? { left: opts.at.x, right: opts.at.x, top: opts.at.y, bottom: opts.at.y }
+    : anchor.getBoundingClientRect();
   const W = pop.offsetWidth || 306;
   const H = pop.offsetHeight || 120;
   const left = Math.min(r.left, window.innerWidth - W - 10);

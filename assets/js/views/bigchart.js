@@ -9,6 +9,7 @@
 
 import { api } from '../core/api.js';
 import { state, market, dpOf, save } from '../core/store.js';
+import { openPrompt } from '../core/picker.js';
 import { fmtPrice, fmtPct, fmtCompact, dirClass, symLabel } from '../core/fmt.js';
 import { Cell } from './cell.js';
 import { DetailPanel } from './detail.js';
@@ -18,7 +19,7 @@ const IVS = ['time', '5d', '1m', '5m', '15m', '1h', '4h', '1d'];
 const wsIv = (iv) => (iv === 'time' ? '1m' : iv === '5d' ? '5m' : iv);
 const pad2 = (n) => String(n).padStart(2, '0');
 
-const TOOLS = ['cursor', 'trend', 'hline', 'rect', 'fib'];
+const TOOLS = ['cursor', 'trend', 'ray', 'hline', 'hray', 'rect', 'fib', 'text'];
 const IV_SEC = { time: 60, '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
 
 /** 秒数 → 3h12m / 45m / 2d */
@@ -188,6 +189,15 @@ class DrawLayer {
     this.schedule();
   }
 
+  /** 恢复一组图元（清空后的撤销用） */
+  restore(items) {
+    this.pushUndo();
+    this.items = (items || []).map((x) => ({ ...x }));
+    this.sel = -1;
+    this.persist();
+    this.schedule();
+  }
+
   removeSelected() {
     if (this.sel < 0 || this.sel >= this.items.length) return false;
     this.pushUndo();
@@ -252,7 +262,7 @@ class DrawLayer {
       e.stopPropagation();
       const it = this.items[this.drag.i];
       if (!it) return;
-      if (it.type === 'hline') {
+      if (it.type === 'hline' || it.type === 'hray' || it.type === 'text') {
         it.p1 = pt;
         if (it.p2) it.p2 = { t: pt.t, p: pt.p };
       } else if (this.drag.which === 'p1') {
@@ -300,13 +310,42 @@ class DrawLayer {
     if (!d) return;
     e.preventDefault();
     e.stopPropagation();
+    if (d.type === 'text') {
+      this.askText(d, e);
+      this.schedule();
+      return;
+    }
     const flat = Math.abs(d.p2.p - d.p1.p) < 1e-12 && d.p2.t === d.p1.t;
-    if (d.type === 'hline' || !flat) {
+    if (d.type === 'hline' || d.type === 'hray' || !flat) {
       this.pushUndo();
       this.items.push(d);
       this.persist();
     }
     this.schedule();
+  }
+
+  /** 文本标注：点一下位置后弹输入框，确认才落地（点取消什么都不留） */
+  askText(draft, e) {
+    const at = e && e.clientX ? { x: e.clientX, y: e.clientY } : null;
+    openPrompt(this.host, {
+      at,
+      title: '文本标注', label: '内容', placeholder: '比如 这里放量 / 注意回踩',
+      okText: '添加', value: '',
+      onOk: (v) => {
+        const txt = String(v).trim().slice(0, 40);
+        if (!txt) return;
+        this.pushUndo();
+        this.items.push({
+          type: 'text',
+          p1: { t: draft.p1.t, p: draft.p1.p },
+          p2: { t: draft.p1.t, p: draft.p1.p },
+          text: txt,
+        });
+        this.persist();
+        this.setTool('cursor');     // 打完字回到光标，避免下一次点击又弹框
+        this.schedule();
+      },
+    });
   }
 
   /** 光标位置附近有没有可拖的端点 / 水平线 */
@@ -316,8 +355,12 @@ class DrawLayer {
       const it = this.items[i];
       const y1 = this.yOf(it.p1.p);
       if (y1 == null) continue;
-      if (it.type === 'hline') {
+      if (it.type === 'hline' || it.type === 'hray') {
         if (Math.abs(y - y1) <= TOL) return { i, which: 'p1' };
+        continue;
+      }
+      if (it.type === 'text') {
+        if (Math.abs(x - x1) <= 70 && Math.abs(y - y1) <= 13) return { i, which: 'p1' };
         continue;
       }
       const x1 = this.xOf(it.p1.t);
@@ -359,12 +402,23 @@ class DrawLayer {
     const y1 = this.yOf(it.p1.p);
     if (x1 == null || y1 == null) return false;
     if (it.type === 'hline') return Math.abs(y - y1) <= TOL;
+    if (it.type === 'hray') return Math.abs(y - y1) <= TOL && x >= x1 - TOL;
+    // 文本按"锚点 + 一小块矩形"命中，别让人去点那一个像素
+    if (it.type === 'text') return Math.abs(x - x1) <= 70 && Math.abs(y - y1) <= 13;
 
     const x2 = this.xOf(it.p2 && it.p2.t);
     const y2 = this.yOf(it.p2 && it.p2.p);
     if (x2 == null || y2 == null) return false;
 
     if (it.type === 'trend') return distToSeg(x, y, x1, y1, x2, y2) <= TOL;
+    if (it.type === 'ray') {
+      // 射线要延伸到画布外，命中检测也按延长后的线段算
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const k = 5000 / len;
+      return distToSeg(x, y, x1, y1, x1 + dx * k, y1 + dy * k) <= TOL;
+    }
     if (it.type === 'rect') {
       const l = Math.min(x1, x2);
       const r = Math.max(x1, x2);
@@ -511,6 +565,37 @@ class DrawLayer {
       return;
     }
 
+    if (it.type === 'hray') {
+      g.beginPath();
+      g.moveTo(x1, y1 + 0.5);
+      g.lineTo(S.w, y1 + 0.5);
+      g.stroke();
+      this.tag(g, S.w - 66, y1, fmtPrice(it.p1.p, dp), S, 'right');
+      g.restore();
+      return;
+    }
+
+    if (it.type === 'text') {
+      const txt = String(it.text || '');
+      if (txt) {
+        g.font = '12px ' + (cv('--font') || 'system-ui');
+        const tw = g.measureText(txt).width;
+        // 底板跟着主题走，压在 K 线上也读得清
+        g.globalAlpha = 0.92;
+        g.fillStyle = S.panel;
+        g.fillRect(x1 - 3, y1 - 13, tw + 10, 18);
+        g.globalAlpha = 1;
+        g.lineWidth = 1;
+        g.strokeStyle = sel ? S.accent : 'rgba(125,135,152,.55)';
+        g.strokeRect(x1 - 2.5, y1 - 12.5, tw + 9, 17);
+        g.fillStyle = sel ? S.accent : S.text;
+        g.fillText(txt, x1 + 2, y1);
+      }
+      if (sel) this.dot(x1, y1, S.accent);
+      g.restore();
+      return;
+    }
+
     const x2 = this.xOf(it.p2 && it.p2.t);
     const y2 = this.yOf(it.p2 && it.p2.p);
     if (x2 == null || y2 == null) { g.restore(); return; }
@@ -519,6 +604,20 @@ class DrawLayer {
       g.beginPath();
       g.moveTo(x1, y1);
       g.lineTo(x2, y2);
+      g.stroke();
+      if (sel) {
+        this.dot(x1, y1, S.accent);
+        this.dot(x2, y2, S.accent);
+      }
+    } else if (it.type === 'ray') {
+      // 只往 p2 那一侧无限延伸；画到画布外，canvas 自己裁
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const k = 5000 / len;
+      g.beginPath();
+      g.moveTo(x1, y1);
+      g.lineTo(x1 + dx * k, y1 + dy * k);
       g.stroke();
       if (sel) {
         this.dot(x1, y1, S.accent);
@@ -760,8 +859,17 @@ export class BigChart {
       if (!b) return;
       const t = b.dataset.tool;
       if (t === 'clear') {
-        if (this.draw && this.draw.items.length && window.confirm('清除这个品种的全部绘图？')) {
-          this.draw.clearAll();
+        // 不用 window.confirm：原生弹窗会阻塞渲染进程（headless 下 CDP 直接卡死），
+        // 而且和「清空自选」的 toast + 撤销不是一套交互
+        const n = this.draw ? this.draw.items.length : 0;
+        if (!n) return;
+        const snap = this.draw.items.slice();
+        this.draw.clearAll();
+        if (this.ctx.toast) {
+          this.ctx.toast(`已清除 ${n} 个绘图`, {
+            label: '撤销',
+            onClick: () => this.draw.restore(snap),
+          });
         }
         return;
       }
