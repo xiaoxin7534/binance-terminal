@@ -40,6 +40,7 @@ const DEFAULTS = {
   bcDetailOpen: true,  // 大图右侧盘口栏（默认打开）
   listDetailOpen: true, // 列表页右侧详情（默认打开）
   detailWidth: 0,       // 拖动调过的宽度，0 = 按 CSS 自适应
+  bcDetailWidth: 0,     // 大图右侧盘口栏的宽度，0 = 按 CSS（320/286）
   rowH: 30,             // 列表行高（px），和 CSS 的 --row-h 必须一致
   cells: DEFAULT_SYMBOLS.slice(0, 8),
   // 自选分组：favs 只是「当前分组」的别名，真正的数据在 favGroups 里
@@ -56,7 +57,7 @@ const DEFAULTS = {
   colOrder: null,
   search: '',
   sort: { key: 'qv', dir: -1 },
-  alert: { on: false, thr: 0.05 },   // 资金费率告警：绝对值 ≥ thr% 时提醒
+  alert: { on: false, thr: 0.05, sys: false },   // 资金费率告警：绝对值 ≥ thr% 时提醒，sys=系统通知
 };
 
 /** 老版本只有 favs 数组，升级时包成第一个分组 */
@@ -118,6 +119,8 @@ function load() {
       indicators: { ...DEFAULTS.indicators, ...(saved.indicators || {}) },
       indParams: { ...DEFAULTS.indParams, ...(saved.indParams || {}) },
       sort: { ...DEFAULTS.sort, ...(saved.sort || {}) },
+      alert: { ...DEFAULTS.alert, ...(saved.alert || {}) },
+      alert: { ...DEFAULTS.alert, ...(saved.alert || {}) },
       cells: Array.isArray(saved.cells) && saved.cells.length ? saved.cells : [...DEFAULTS.cells],
       favGroups: normalizeGroups(saved),
     };
@@ -149,6 +152,7 @@ export function save() {
         gridSector: state.gridSector, colOrder: state.colOrder, sort: state.sort,
         alert: state.alert, uiV: 3,
         listDetailOpen: state.listDetailOpen, detailWidth: state.detailWidth,
+        bcDetailWidth: state.bcDetailWidth,
         rowH: state.rowH,
       }));
     } catch (e) { /* 隐私模式下忽略 */ }

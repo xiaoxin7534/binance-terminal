@@ -1706,27 +1706,35 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
 
 .bc-ind { display: flex; gap: 5px; flex: 0 0 auto; }
 
+/* 绘图工具：拆成「画线工具」和「删除/清空」两粒胶囊，中间留空，
+   7 个图标挤成一条时很难分辨哪个是哪个 */
 .bc-draw {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+.bc-draw-grp {
+  display: flex;
+  align-items: center;
+  gap: 3px;
   padding: 2px;
   background: var(--panel-3);
   border-radius: 6px;
-  flex: 0 0 auto;
 }
 .bc-draw button {
-  width: 24px;
-  height: 22px;
+  width: 26px;
+  height: 23px;
   border-radius: 4px;
   color: var(--text-2);
   display: grid;
   place-items: center;
   transition: background .12s, color .12s;
 }
+.bc-draw button svg { width: 14px; height: 14px; }
 .bc-draw button:hover { background: var(--hover); color: var(--text); }
 .bc-draw button.on { background: var(--accent-soft); color: var(--accent); }
-.bc-draw-sep { width: 1px; height: 14px; background: var(--border-2); margin: 0 3px; }
+.bc-draw-sep { width: 1px; height: 16px; background: var(--border-2); }
 
 .bc-info {
   height: 28px;
@@ -1747,7 +1755,31 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
 
 .bc-body { flex: 1; min-height: 0; display: flex; position: relative; }
 .bc-body > .cell { position: relative; flex: 1; min-width: 0; }
-.bc-body.dt-off > .bc-detail { display: none; }
+.bc-body.dt-off > .bc-detail,
+.bc-body.dt-off > .bc-resize { display: none; }
+/* 盘口栏左缘的拖拽条：平时只有 1px 分隔线，鼠标移上去才亮成 3px */
+.bc-resize {
+  flex: 0 0 6px;
+  width: 6px;
+  margin-left: -3px;
+  margin-right: -3px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 3;
+}
+.bc-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background .12s;
+}
+.bc-resize:hover::after,
+.bc-resize.active::after { background: var(--accent); }
 .bc-detail {
   width: 320px;
   flex: 0 0 320px;
@@ -1991,6 +2023,8 @@ kbd {
 }
 .al-head h3 { margin: 0; font-size: 14px; font-weight: 700; white-space: nowrap; }
 .al-label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.al-sys { flex: 0 0 auto; }
+.al-sys > span:last-child { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .al-input {
   width: 68px;
   height: 26px;

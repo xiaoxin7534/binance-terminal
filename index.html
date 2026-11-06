@@ -278,6 +278,7 @@
     <span class="vdiv"></span>
 
     <div class="bc-draw" id="bc-draw">
+      <div class="bc-draw-grp">
       <button data-tool="cursor" class="on" title="光标：点选图元后按 Delete 删除">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3l14 8-6 1.6L10.4 19z"/></svg>
       </button>
@@ -293,13 +294,16 @@
       <button data-tool="fib" title="斐波那契回撤">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 5h16M4 9.8h16M4 14.6h16M4 19.4h16" stroke-dasharray="2 2"/><path d="M4 5v14.4" stroke-width="1"/></svg>
       </button>
+      </div>
       <span class="bc-draw-sep"></span>
+      <div class="bc-draw-grp">
       <button data-tool="undo" title="删除选中的图元 (Delete)">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M9 7V4.8h6V7M6.5 7l.9 12.2h9.2L17.5 7"/></svg>
       </button>
       <button data-tool="clear" title="清除当前品种的全部绘图">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
+      </div>
     </div>
 
     <button class="icon-btn" id="bc-close" title="关闭 (Esc)">
@@ -315,6 +319,7 @@
         <path d="M21 3v6h-6"/>
       </svg>
     </button>
+    <div class="bc-resize" id="bc-resize" title="拖动调整盘口栏宽度（双击复位）"></div>
     <aside class="detail bc-detail" id="bc-detail"></aside>
   </div>
 </div>
@@ -333,7 +338,11 @@
       <input class="al-input" id="al-thr" type="number" step="0.01" min="0.001" max="5">
       <span class="al-label">%</span>
       <div class="tb-spacer"></div>
-      <span class="muted al-hint">常规费率约 0.01%，8 小时结算一次</span>
+      <label class="switch al-sys" title="命中时弹系统通知（首次需要授权）">
+        <input type="checkbox" id="al-sys">
+        <span class="track"></span>
+        <span>系统通知</span>
+      </label>
       <button class="icon-btn" id="al-close" title="关闭 (Esc)">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>

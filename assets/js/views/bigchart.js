@@ -644,10 +644,67 @@ export class BigChart {
     this.toolBar = root.querySelector('#bc-draw');
 
     this.bindBar();
+    this.bindDetailResize();
     // 按上次的选择同步 UI（HTML 里不写死，避免首帧闪一下）
     this.body.classList.toggle('dt-off', !this.showDetail);
     const db = this.root.querySelector('#bc-detail-btn');
     if (db) db.classList.toggle('on', this.showDetail);
+  }
+
+  /** 盘口栏拖宽：和列表页详情面板同一套手感（左缘拖动、双击复位、宽度落盘） */
+  bindDetailResize() {
+    const h = this.root.querySelector('#bc-resize');
+    const d = this.detailPanel.root;
+    if (!h || !d) return;
+
+    const applyW = (w) => {
+      d.style.width = w + 'px';
+      d.style.flexBasis = w + 'px';
+    };
+    if (state.bcDetailWidth) applyW(state.bcDetailWidth);
+
+    let startX = 0;
+    let startW = 0;
+    let dragging = false;
+
+    h.addEventListener('pointerdown', (e) => {
+      if (!this.showDetail) return;
+      dragging = true;
+      startX = e.clientX;
+      startW = d.getBoundingClientRect().width;
+      // 合成事件 / 触控笔边界情况下 capture 会抛 NotFoundError，不该因此中断拖拽
+      try { h.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      h.classList.add('active');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+
+    h.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      // 往左拖变宽；上下限按"再宽就没有图"和"再窄盘口就挤成一列"来定
+      const w = Math.max(240, Math.min(560, startW - (e.clientX - startX)));
+      applyW(w);
+      state.bcDetailWidth = Math.round(w);
+    });
+
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      h.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      save();
+    };
+    h.addEventListener('pointerup', end);
+    h.addEventListener('pointercancel', end);
+
+    h.addEventListener('dblclick', () => {
+      state.bcDetailWidth = 0;
+      d.style.width = '';
+      d.style.flexBasis = '';
+      save();
+    });
   }
 
   isOpen() {

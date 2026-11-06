@@ -22,8 +22,9 @@ export class Alerts {
     this.listEl = root.querySelector('#al-list');
     this.onEl = root.querySelector('#al-on');
     this.thrEl = root.querySelector('#al-thr');
+    this.sysEl = root.querySelector('#al-sys');
 
-    if (!state.alert) state.alert = { on: false, thr: 0.05 };
+    if (!state.alert) state.alert = { on: false, thr: 0.05, sys: false };
     this.onEl.checked = !!state.alert.on;
     this.thrEl.value = state.alert.thr;
 
@@ -50,6 +51,41 @@ export class Alerts {
       }
       this.render();
     });
+
+    // 系统通知开关：要授权，被拒就自动弹回去（不能让开关停在"开"但实际收不到）
+    if (this.sysEl) {
+      this.sysEl.checked = !!state.alert.sys && 'Notification' in window
+        && Notification.permission === 'granted';
+      this.sysEl.addEventListener('change', async () => {
+        const save = () => { if (this.ctx.save) this.ctx.save(); };
+        if (!this.sysEl.checked) {
+          state.alert.sys = false;
+          save();
+          return;
+        }
+        if (!('Notification' in window)) {
+          this.sysEl.checked = false;
+          if (this.ctx.toast) this.ctx.toast('这个浏览器不支持系统通知');
+          return;
+        }
+        let perm = Notification.permission;
+        if (perm === 'default') {
+          try {
+            perm = await Notification.requestPermission();
+          } catch (e) { perm = 'denied'; }
+        }
+        if (perm !== 'granted') {
+          this.sysEl.checked = false;
+          state.alert.sys = false;
+          save();
+          if (this.ctx.toast) this.ctx.toast('系统通知被浏览器拦下了，地址栏左侧可以放行');
+          return;
+        }
+        state.alert.sys = true;
+        save();
+        if (this.ctx.toast) this.ctx.toast('资金费率告警会弹系统通知');
+      });
+    }
 
     root.querySelector('#al-close').addEventListener('click', () => this.close());
     root.addEventListener('click', (e) => {
@@ -128,6 +164,20 @@ export class Alerts {
     if (this.ctx.toast) this.ctx.toast(`${name} 资金费率超过 ±${thr}%${more}`);
     this.beep();
     if (this.ctx.onFlash) this.ctx.onFlash();
+
+    // 窗口在后台时页面内提示看不见，这时只有系统通知有用。
+    // silent: 已经有蜂鸣了，别再来一次系统提示音。
+    if (state.alert.sys && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        const fr = first && first.fr != null ? `（${fmtFunding(first.fr)}）` : '';
+        const n = new Notification(`资金费率告警${fr}`, {
+          body: `${name} 超过 ±${thr}%${more}`,
+          tag: 'bterm-funding',       // 同 tag 只留一条，别把通知中心刷满
+          silent: true,
+        });
+        n.onclick = () => { window.focus(); n.close(); };
+      } catch (e) { /* 平台不支持就算了，页面内提示还在 */ }
+    }
   }
 
   /** 短促的两声蜂鸣，不用音频文件 */

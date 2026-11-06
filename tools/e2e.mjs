@@ -1485,6 +1485,208 @@ test('自选分组：新建 / 隔离 / 重命名 / 删除可撤销', async (s) =
   assert(end.cur, '当前分组丢了');
 });
 
+test('大图：盘口栏拖动调宽 + 双击复位', async (s) => {
+  await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,300));
+    window.__term.big.open('BTCUSDT@f');
+    await new Promise(r=>setTimeout(r,2600));
+    const b = window.__term.big;
+    if (!b.showDetail) b.setDetail(true);
+    await new Promise(r=>setTimeout(r,700));
+    return 1;
+  `);
+
+  const before = await s.ev(`
+    const d = document.querySelector('#bc-detail');
+    const h = document.querySelector('#bc-resize');
+    return { w: Math.round(d.getBoundingClientRect().width),
+             handle: !!h, handleW: h ? Math.round(h.getBoundingClientRect().width) : 0,
+             saved: window.__term.state.bcDetailWidth };
+  `);
+  assert(before.handle, '盘口栏没有拖拽手柄 #bc-resize');
+  assert(before.handleW >= 4, '拖拽手柄太窄，抓不住：' + before.handleW);
+  assert(before.w > 200, '盘口栏宽度异常：' + before.w);
+
+  // 往左拖 60px → 盘口栏变宽 60px
+  const drag = await s.ev(`
+    const h = document.querySelector('#bc-resize');
+    const x0 = 1200;
+    h.dispatchEvent(new PointerEvent('pointerdown', { bubbles:true, clientX:x0, pointerId:1 }));
+    h.dispatchEvent(new PointerEvent('pointermove', { bubbles:true, clientX:x0-60, pointerId:1 }));
+    h.dispatchEvent(new PointerEvent('pointerup',   { bubbles:true, clientX:x0-60, pointerId:1 }));
+    await new Promise(r=>setTimeout(r,300));
+    const d = document.querySelector('#bc-detail');
+    const cell = document.querySelector('#bc-body .cell');
+    return { w: Math.round(d.getBoundingClientRect().width),
+             stateW: window.__term.state.bcDetailWidth,
+             cellW: cell ? Math.round(cell.getBoundingClientRect().width) : 0,
+             cursor: document.body.style.cursor };
+  `);
+  assert(Math.abs(drag.w - (before.w + 60)) <= 3,
+    `拖动 60px 后宽度应约 ${before.w + 60}，实际 ${drag.w}`);
+  assertEq(drag.stateW, drag.w, 'state.bcDetailWidth 和实际宽度不一致');
+  assert(drag.cellW > 200, '拖动后图表区被挤没了：' + drag.cellW);
+  assertEq(drag.cursor, '', '拖动结束后鼠标指针没还原');
+
+  const saved = await s.ev(`
+    const s = JSON.parse(localStorage.getItem('binance-terminal.v1')||'{}');
+    return s.bcDetailWidth;
+  `);
+  assertEq(saved, drag.w, '拖完没写进 localStorage');
+
+  // 双击复位
+  const reset = await s.ev(`
+    const h = document.querySelector('#bc-resize');
+    h.dispatchEvent(new MouseEvent('dblclick', { bubbles:true }));
+    await new Promise(r=>setTimeout(r,300));
+    return { w: Math.round(document.querySelector('#bc-detail').getBoundingClientRect().width),
+             stateW: window.__term.state.bcDetailWidth };
+  `);
+  assertEq(reset.stateW, 0, '双击后 state 没归零');
+  assert(Math.abs(reset.w - before.w) <= 3, `双击复位后宽度应回到 ${before.w}，实际 ${reset.w}`);
+
+  await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,500)); return 1;`);
+});
+
+test('绘图工具栏：拆成两组，点击仍然生效', async (s) => {
+  await s.ev(`
+    window.__term.big.open('BTCUSDT@f');
+    await new Promise(r=>setTimeout(r,1800));
+    return 1;
+  `);
+  const r = await s.ev(`
+    const groups = [...document.querySelectorAll('#bc-draw .bc-draw-grp')];
+    const btns = [...document.querySelectorAll('#bc-draw button[data-tool]')];
+    const sizes = groups.map(g => g.querySelectorAll('button').length);
+    // 点「矩形」看是否切换成 on
+    const rect = document.querySelector('#bc-draw button[data-tool="rect"]');
+    rect.click();
+    await new Promise(r=>setTimeout(r,200));
+    const onNow = [...document.querySelectorAll('#bc-draw button.on')].map(b=>b.dataset.tool);
+    const w = Math.round(rect.getBoundingClientRect().width);
+    const h = Math.round(rect.getBoundingClientRect().height);
+    // 回到光标，别影响后面的用例
+    document.querySelector('#bc-draw button[data-tool="cursor"]').click();
+    await new Promise(r=>setTimeout(r,150));
+    return { groups: groups.length, sizes, n: btns.length, onNow, w, h };
+  `);
+  assertEq(r.groups, 2, '绘图工具栏应该是两组');
+  assertEq(r.sizes.join(','), '5,2', '两组按钮数不对：' + r.sizes.join(','));
+  assertEq(r.n, 7, '绘图按钮总数不对：' + r.n);
+  assert(r.onNow.includes('rect'), '点矩形后没有选中：' + r.onNow.join(','));
+  assert(r.w >= 24 && r.h >= 21, `按钮太小：${r.w}×${r.h}`);
+
+  await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,400)); return 1;`);
+});
+
+test('告警：系统通知开关（授权通过 / 被拒回弹）', async (s) => {
+  const r = await s.ev(`
+    // 用假 Notification 替掉浏览器的：headless 下没法真的授权
+    const real = window.Notification;
+    const made = [];
+    class FakeN {
+      constructor(t, o) { made.push({ t, o }); }
+      close() {}
+    }
+    FakeN.permission = 'granted';
+    FakeN.requestPermission = async () => 'granted';
+    window.Notification = FakeN;
+    window.__made = made;
+
+    document.querySelector('#btn-alerts').click();
+    await new Promise(r=>setTimeout(r,300));
+    const sys = document.querySelector('#al-sys');
+    if (!sys) { window.Notification = real; return { ok:false }; }
+    if (!sys.checked) { sys.click(); }
+    await new Promise(r=>setTimeout(r,300));
+
+    const on = { checked: sys.checked, state: window.__term.state.alert.sys };
+
+    // 直接触发一次命中：拿一个永续合约
+    const sym = [...window.__term.market.values()].find(x => x.mkt === 'perp').s;
+    window.__term.alerts.notify([sym], 0.05);
+    await new Promise(r=>setTimeout(r,200));
+    const one = made.slice();
+
+    // 再触发一次：同 tag 应该继续产生新通知（我们只断言会继续调用）
+    window.__term.alerts.notify([sym], 0.05);
+    await new Promise(r=>setTimeout(r,120));
+
+    // 被拒的路径：权限改 denied，再点一次开关
+    sys.click();
+    await new Promise(r=>setTimeout(r,200));
+    FakeN.permission = 'denied';
+    FakeN.requestPermission = async () => 'denied';
+    sys.click();
+    await new Promise(r=>setTimeout(r,300));
+    const denied = { checked: sys.checked, state: window.__term.state.alert.sys };
+
+    window.Notification = real;
+    return { ok:true, on, n: one.length, first: one[0] || null,
+             total: made.length, denied };
+  `);
+  assert(r.ok, '告警面板里没有 #al-sys 开关');
+  assert(r.on.checked, '打开后开关没勾上');
+  assertEq(r.on.state, true, 'state.alert.sys 没置 true');
+  assertEq(r.n, 1, '命中一次应该弹 1 条系统通知，实际 ' + r.n);
+  assert(r.first && r.first.t.includes('资金费率'), '通知标题不对：' + (r.first && r.first.t));
+  assert(r.first.o && String(r.first.o.body).includes('±') && String(r.first.o.body).includes('超过'),
+    '通知正文不对：' + (r.first.o && r.first.o.body));
+  assertEq(r.first.o.tag, 'bterm-funding', '通知没带固定 tag，会把通知中心刷满');
+  assertEq(r.total, 2, '第二次命中没有再次通知');
+  assertEq(r.denied.checked, false, '权限被拒后开关应该自动弹回');
+  assertEq(r.denied.state, false, '权限被拒后 state 应该回到 false');
+
+  // 收拾：关掉告警面板和告警开关
+  await s.ev(`
+    document.querySelector('#al-close').click();
+    await new Promise(r=>setTimeout(r,200));
+    const on = document.querySelector('#al-on');
+    if (on.checked) { on.click(); }
+    await new Promise(r=>setTimeout(r,200));
+    return 1;
+  `);
+});
+
+test('详情面板：清空时真的销毁图表（防库内部 Value is null）', async (s) => {
+  await s.ev(`
+    window.__term.big.open('ETHUSDT@f');
+    await new Promise(r=>setTimeout(r,2400));
+    return 1;
+  `);
+  const before = await s.ev(`
+    const dp = window.__term.big.detailPanel;
+    return { chart: !!dp.chart, ro: !!dp.ro };
+  `);
+  assert(before.chart, '详情面板没有图表，用例前提不成立');
+
+  const r = await s.ev(`
+    const dp = window.__term.big.detailPanel;
+    let removed = 0;
+    if (dp.chart) {
+      const orig = dp.chart.remove.bind(dp.chart);
+      dp.chart.remove = () => { removed++; return orig(); };
+    }
+    let roOff = 0;
+    if (dp.ro) {
+      const orig = dp.ro.disconnect.bind(dp.ro);
+      dp.ro.disconnect = () => { roOff++; return orig(); };
+    }
+    dp.renderEmpty();
+    await new Promise(r=>requestAnimationFrame(()=>setTimeout(r,120)));
+    return { removed, roOff, chart: dp.chart, ro: dp.ro,
+             empty: !!dp.root.querySelector('.dt-empty') };
+  `);
+  assertEq(r.removed, 1, 'renderEmpty 没有调用 chart.remove()（库内部观察器会继续挂在废弃节点上）');
+  assertEq(r.roOff, 1, 'renderEmpty 没有断开 ResizeObserver');
+  assertEq(r.chart, null, 'chart 引用没清空');
+  assertEq(r.ro, null, 'ro 引用没清空');
+  assert(r.empty, '没有回到空状态');
+
+  await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,500)); return 1;`);
+});
+
 /* ================================================================== 执行 */
 const server = await checkServer();
 const bin = findChrome();

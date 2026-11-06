@@ -44,8 +44,18 @@ export class DetailPanel {
   }
 
   renderEmpty() {
+    // 图表必须先 remove：只把引用置 null 的话，lightweight-charts 内部的
+    // ResizeObserver 还挂在即将被 innerHTML 丢掉的节点上，之后可能从库内部
+    // 抛 "Value is null"（栈里没有我们自己的帧，很难查）。
+    if (this.ro) {
+      this.ro.disconnect();
+      this.ro = null;
+    }
+    if (this.chart) {
+      try { this.chart.remove(); } catch (e) { /* 已经没了 */ }
+      this.chart = null;
+    }
     this.root.innerHTML = '<div class="dt-empty">选择左侧任意币种<br>查看盘口与明细</div>';
-    this.chart = null;
     this.$ = null;
     this.symbol = null;      // 不清掉的话，下次 setSymbol 同一个币会 early-return
     this.lastDepth = null;
