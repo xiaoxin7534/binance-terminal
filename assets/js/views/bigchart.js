@@ -15,12 +15,14 @@ import { Cell } from './cell.js';
 import { DetailPanel } from './detail.js';
 
 const DRAW_KEY = 'binance-terminal.drawings.v1';
-const IVS = ['time', '5d', '1m', '5m', '15m', '1h', '4h', '1d'];
+const IVS = ['time', '5d', '1m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w', '1M'];
 const wsIv = (iv) => (iv === 'time' ? '1m' : iv === '5d' ? '5m' : iv);
 const pad2 = (n) => String(n).padStart(2, '0');
 
 const TOOLS = ['cursor', 'trend', 'ray', 'hline', 'hray', 'rect', 'fib', 'text'];
-const IV_SEC = { time: 60, '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
+const IV_SEC = { time: 60, '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600,
+  '2h': 7200, '4h': 14400, '6h': 21600, '12h': 43200, '1d': 86400,
+  '1w': 604800, '1M': 2592000 };
 
 /** 秒数 → 3h12m / 45m / 2d */
 function fmtSpan(sec) {
@@ -712,7 +714,7 @@ export class BigChart {
     this.root = root;
     this.ctx = ctx;
     this.symbol = null;
-    this.interval = '1m';
+    this.interval = state.bcInterval || '1d';
     this.cell = null;
     this.draw = null;
     this.boundChart = null;
@@ -1111,6 +1113,8 @@ export class BigChart {
   setInterval(iv) {
     if (!IVS.includes(iv) || iv === this.interval) return;
     this.interval = iv;
+    state.bcInterval = iv;      // 大图有自己的周期记忆，下次打开还是这个
+    save();
     this.syncIv();
     if (!this.cell) return;
     this.cell.setInterval(iv);

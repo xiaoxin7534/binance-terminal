@@ -171,6 +171,8 @@ test('页面加载：无 JS 报错，行情到位', async (s) => {
       view: window.__term.state.view,
     };
   `);
+  const defIv = await s.ev('return window.__term.state.bcInterval;');
+  assertEq(defIv, '1d', '大图默认周期不是日线（首次运行）：' + defIv);
   assert(info.cells > 0, '格子没渲染');
   assert(info.tickers > 1000, '行情数量异常：' + info.tickers);
   assert(s.errors.length === 0, '页面有报错：\n  ' + s.errors.slice(0, 3).join('\n  '));
@@ -1894,6 +1896,78 @@ test('大图：头部报价跟逐笔一致，面板收起仍订阅逐笔', async
     window.__term.big.setDetail(true);
     window.__term.syncSubs();
     await new Promise(r=>setTimeout(r,700));
+    window.__term.big.close();
+    await new Promise(r=>setTimeout(r,400));
+    return 1;
+  `);
+});
+
+test('周期：大图默认日线，周线/月线/30分都能出图', async (s) => {
+  // 1) 走真实入口（双击格子）：大图应当用自己记住的周期，而不是格子的周期
+  const first = await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,400));
+    window.__term.state.bcInterval = '1d';
+    window.__term.state.interval = '1m';      // 格子墙是 1m，大图仍应是日线
+    document.querySelector('#grid .cell').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
+    await new Promise(r=>setTimeout(r,3000));
+    const b = window.__term.big;
+    const onBtn = [...document.querySelectorAll('#bc-iv button.on')].map(x=>x.dataset.iv);
+    return { iv: b.interval, onBtn, bars: b.cell ? b.cell.bars.length : 0,
+             label: document.querySelector('#bc-iv button[data-iv="1d"]').textContent };
+  `);
+  assertEq(first.iv, '1d', '大图没听 bcInterval（格子的 1m 串进来了）：' + first.iv);
+  assert(first.onBtn.includes('1d'), '日线按钮没高亮：' + first.onBtn.join(','));
+  assert(first.bars > 10, '日线没加载出 K 线：' + first.bars);
+
+  // 2) 周期条里要有 30分 / 周线 / 月线
+  const btns = await s.ev(`
+    const all = [...document.querySelectorAll('#bc-iv button')].map(b=>b.dataset.iv);
+    return { all, has30: all.includes('30m'), hasW: all.includes('1w'), hasM: all.includes('1M'),
+             wall30: !!document.querySelector('#interval-seg button[data-iv="30m"]') };
+  `);
+  assert(btns.has30 && btns.hasW && btns.hasM, '大图周期条缺按钮：' + btns.all.join(','));
+  assert(btns.wall30, '格子墙顶栏没有 30分 按钮');
+
+  // 3) 逐个切过去，确认都能出 K 线
+  const check = async (iv, minBars) => {
+    const r = await s.ev(`
+      document.querySelector('#bc-iv button[data-iv="${iv}"]').click();
+      for (let i=0;i<120;i++){
+        const c = window.__term.big.cell;
+        if (c && c.loadedKey === c.symbol + '|' + '${iv}' && c.bars.length > ${minBars}) break;
+        await new Promise(r=>setTimeout(r,100));
+      }
+      const c = window.__term.big.cell;
+      return { iv: window.__term.big.interval, bars: c ? c.bars.length : 0,
+               loaded: c ? c.loadedKey : '', saved: window.__term.state.bcInterval };
+    `);
+    assertEq(r.iv, iv, '切到 ' + iv + ' 失败，实际 ' + r.iv);
+    assert(r.bars > minBars, iv + ' 没加载出 K 线：' + r.bars);
+    assertEq(r.saved, iv, '切换后没写进 state.bcInterval');
+    return r;
+  };
+
+  await check('30m', 20);
+  await check('1w', 20);
+  await check('1M', 5);
+
+  // 4) 关掉再打开，应该记住上次的周期
+  const reopen = await s.ev(`
+    window.__term.big.close();
+    await new Promise(r=>setTimeout(r,400));
+    window.__term.big.open('BTCUSDT@f');
+    await new Promise(r=>setTimeout(r,2200));
+    return { iv: window.__term.big.interval,
+             onBtn: [...document.querySelectorAll('#bc-iv button.on')].map(x=>x.dataset.iv) };
+  `);
+  assertEq(reopen.iv, '1M', '重新打开没记住月线：' + reopen.iv);
+  assert(reopen.onBtn.includes('1M'), '月线按钮没高亮：' + reopen.onBtn.join(','));
+
+  // 5) 回到日线，别影响后面的用例
+  await s.ev(`
+    document.querySelector('#bc-iv button[data-iv="1d"]').click();
+    await new Promise(r=>setTimeout(r,1200));
     window.__term.big.close();
     await new Promise(r=>setTimeout(r,400));
     return 1;

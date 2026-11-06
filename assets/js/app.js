@@ -490,7 +490,8 @@ function openBig(sym, iv) {
   state.selected = sym;
   save();
   setActiveSymbol(sym);
-  big.open(sym, iv || state.interval);
+  // 大图有自己的周期记忆（默认日线），不再跟着格子墙的周期走
+  big.open(sym, state.bcInterval || '1d');
   syncSubs();
 }
 

@@ -311,6 +311,34 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   transition: background .13s, color .13s;
   white-space: nowrap;
 }
+/* 大图周期条：14 个档位，窄窗口下允许自己横向滚动，
+   不要把右侧的绘图工具/关闭按钮顶出屏幕（1366 下原来溢出 227px） */
+.bc-bar .seg {
+  flex: 0 0 auto;          /* 宽屏不压缩：14 个档位要完整显示 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.bc-bar .seg::-webkit-scrollbar { display: none; }
+@media (max-width: 1500px) {
+  /* 窄窗口才允许压缩 + 内部横向滚动，保证右侧绘图工具不被顶出屏幕 */
+  .bc-bar .seg { flex: 0 1 auto; min-width: 0; }
+  .bc-bar .seg button { padding: 0 5px; font-size: 11px; min-width: 24px; }
+}
+/* 大图周期条：14 个档位，窄窗口下允许自己横向滚动，
+   不要把右侧的绘图工具/关闭按钮顶出屏幕（1366 下原来溢出 227px） */
+.bc-bar .seg {
+  flex: 0 0 auto;          /* 宽屏不压缩：14 个档位要完整显示 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.bc-bar .seg::-webkit-scrollbar { display: none; }
+@media (max-width: 1500px) {
+  /* 窄窗口才允许压缩 + 内部横向滚动，保证右侧绘图工具不被顶出屏幕 */
+  .bc-bar .seg { flex: 0 1 auto; min-width: 0; }
+  .bc-bar .seg button { padding: 0 5px; font-size: 11px; min-width: 24px; }
+}
 .seg button:hover { color: var(--text); background: var(--hover); }
 .seg button.on {
   background: var(--panel);

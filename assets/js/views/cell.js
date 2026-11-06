@@ -11,11 +11,12 @@ import { sma, ema, boll, macd, macdLast, lastSma, lastEma, lastBoll } from '../c
 import { openPicker } from '../core/picker.js';
 
 const LC = window.LightweightCharts;
-const IVS = ['time', '5d', '1m', '5m', '15m', '1h', '4h', '1d'];
+const IVS = ['time', '5d', '1m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w', '1M'];
 /** 走「折线分时」路径的周期：当日分时 + 5 日连续分时 */
 const isIntradayIv = (iv) => iv === 'time' || iv === '5d';
 const IV_LABEL = {
-  time: '分时', '1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d',
+  time: '分时', '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1h',
+  '2h': '2h', '4h': '4h', '6h': '6h', '12h': '12h', '1d': '1d', '1w': '1w', '1M': '1M',
 };
 /** 分时用 1 分钟数据算，但订阅要落回 1m 流 */
 export const wsInterval = (iv) => (iv === 'time' ? '1m' : iv === '5d' ? '5m' : iv);
