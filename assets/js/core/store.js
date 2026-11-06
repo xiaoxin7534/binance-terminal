@@ -22,6 +22,8 @@ export const IND_DEFAULTS = Object.freeze({
   spike: 3,          // 爆量阈值：本根成交额 ≥ 前 20 根均额的 N 倍
 });
 
+const DEFAULT_FAVS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+
 const DEFAULTS = {
   view: 'grid',
   theme: 'light',
@@ -40,7 +42,9 @@ const DEFAULTS = {
   detailWidth: 0,       // 拖动调过的宽度，0 = 按 CSS 自适应
   rowH: 30,             // 列表行高（px），和 CSS 的 --row-h 必须一致
   cells: DEFAULT_SYMBOLS.slice(0, 8),
-  favs: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'],
+  // 自选分组：favs 只是「当前分组」的别名，真正的数据在 favGroups 里
+  favGroups: [{ id: 'g1', name: '自选', list: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] }],
+  favGroup: 'g1',
   selected: 'BTCUSDT',
   mkt: 'all',          // 最大分类：all / spot / perp
   tab: 'all',
@@ -55,10 +59,42 @@ const DEFAULTS = {
   alert: { on: false, thr: 0.05 },   // 资金费率告警：绝对值 ≥ thr% 时提醒
 };
 
+/** 老版本只有 favs 数组，升级时包成第一个分组 */
+function normalizeGroups(saved) {
+  const src = Array.isArray(saved.favGroups) ? saved.favGroups : [];
+  const groups = [];
+  const seen = new Set();
+  for (const g of src) {
+    if (!g || typeof g.id !== 'string' || seen.has(g.id)) continue;
+    seen.add(g.id);
+    groups.push({
+      id: g.id,
+      name: String(g.name || '自选').slice(0, 12),
+      list: Array.isArray(g.list) ? g.list.filter((x) => typeof x === 'string') : [],
+    });
+  }
+  if (groups.length) return groups;
+  const legacy = Array.isArray(saved.favs) ? saved.favs.filter((x) => typeof x === 'string') : null;
+  return [{ id: 'g1', name: '自选', list: legacy || [...DEFAULT_FAVS] }];
+}
+
+/** 让 state.favs 指向当前分组那个数组。
+ *  是**别名**不是拷贝：别处拿到 state.favs 后原地 push / length=0 才写得到分组上。 */
+function withActiveFavs(st) {
+  if (!Array.isArray(st.favGroups) || !st.favGroups.length) {
+    st.favGroups = [{ id: 'g1', name: '自选', list: [...DEFAULT_FAVS] }];
+  }
+  const cur = st.favGroups.find((g) => g.id === st.favGroup) || st.favGroups[0];
+  st.favGroup = cur.id;
+  st.favs = cur.list;
+  return st;
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return { ...DEFAULTS, cells: [...DEFAULTS.cells], favs: [...DEFAULTS.favs] };
+    if (!raw) return withActiveFavs({ ...DEFAULTS, cells: [...DEFAULTS.cells],
+      favGroups: DEFAULTS.favGroups.map((g) => ({ ...g, list: [...g.list] })) });
     const saved = JSON.parse(raw);
     if (saved.tab === 'stock') saved.tab = 'tradfi';   // 旧版本字段迁移
     if (saved.tab === 'perp') {                        // 永续从页签升级为一级分类
@@ -77,16 +113,18 @@ function load() {
       saved.detailWidth = 0;
       saved.uiV = 3;
     }
-    return {
+    const out = {
       ...DEFAULTS, ...saved,
       indicators: { ...DEFAULTS.indicators, ...(saved.indicators || {}) },
       indParams: { ...DEFAULTS.indParams, ...(saved.indParams || {}) },
       sort: { ...DEFAULTS.sort, ...(saved.sort || {}) },
       cells: Array.isArray(saved.cells) && saved.cells.length ? saved.cells : [...DEFAULTS.cells],
-      favs: Array.isArray(saved.favs) ? saved.favs : [...DEFAULTS.favs],
+      favGroups: normalizeGroups(saved),
     };
+    return withActiveFavs(out);
   } catch (e) {
-    return { ...DEFAULTS, cells: [...DEFAULTS.cells], favs: [...DEFAULTS.favs] };
+    return withActiveFavs({ ...DEFAULTS, cells: [...DEFAULTS.cells],
+      favGroups: DEFAULTS.favGroups.map((g) => ({ ...g, list: [...g.list] })) });
   }
 }
 
@@ -104,6 +142,7 @@ export function save() {
         interval: state.interval, indicators: state.indicators,
         indParams: state.indParams,
         sync: state.sync, cells: state.cells, favs: state.favs,
+        favGroups: state.favGroups, favGroup: state.favGroup,
         detailOpen: state.detailOpen,
         selected: state.selected, mkt: state.mkt, tab: state.tab, sector: state.sector,
         region: state.region, notify: state.notify, cvd: state.cvd,
@@ -291,4 +330,90 @@ export function setFavs(list) {
   for (const s of list || []) if (!state.favs.includes(s)) state.favs.push(s);
   save();
   window.dispatchEvent(new CustomEvent('favchange', { detail: null }));
+}
+
+/* ---------------------------------------------------------------- 自选分组 */
+
+export function currentFavGroup() {
+  return state.favGroups.find((g) => g.id === state.favGroup) || state.favGroups[0];
+}
+
+function emitFavs() {
+  window.dispatchEvent(new CustomEvent('favchange', { detail: null }));
+}
+
+/** 切分组。favs 要重新指向新分组的数组，否则后续增删会写回上一个分组 */
+export function setFavGroup(id) {
+  const g = state.favGroups.find((x) => x.id === id);
+  if (!g || g.id === state.favGroup) return false;
+  state.favGroup = g.id;
+  state.favs = g.list;
+  save();
+  emitFavs();
+  return true;
+}
+
+export function addFavGroup(name) {
+  const nm = String(name || '').trim().slice(0, 12) || '新分组';
+  let id = '';
+  do {
+    id = 'g' + Math.random().toString(36).slice(2, 7);
+  } while (state.favGroups.some((g) => g.id === id));
+  const g = { id, name: nm, list: [] };
+  state.favGroups.push(g);
+  state.favGroup = id;
+  state.favs = g.list;
+  save();
+  emitFavs();
+  return g;
+}
+
+export function renameFavGroup(id, name) {
+  const g = state.favGroups.find((x) => x.id === id);
+  const nm = String(name || '').trim().slice(0, 12);
+  if (!g || !nm || g.name === nm) return false;
+  g.name = nm;
+  save();
+  emitFavs();
+  return true;
+}
+
+/** 删分组：只剩一个时拒绝（否则用户会掉进"没有自选栏"的状态） */
+export function removeFavGroup(id) {
+  if (state.favGroups.length <= 1) return false;
+  const i = state.favGroups.findIndex((g) => g.id === id);
+  if (i < 0) return false;
+  const wasCurrent = state.favGroups[i].id === state.favGroup;
+  state.favGroups.splice(i, 1);
+  if (wasCurrent) {
+    state.favGroup = state.favGroups[0].id;
+    state.favs = state.favGroups[0].list;
+  }
+  save();
+  emitFavs();
+  return true;
+}
+
+/** 撤销删除：把分组原样放回原来的位置 */
+export function restoreFavGroup(group, index) {
+  if (!group || !group.id || state.favGroups.some((g) => g.id === group.id)) return false;
+  const at = Math.max(0, Math.min(Number(index) || 0, state.favGroups.length));
+  state.favGroups.splice(at, 0, {
+    id: group.id,
+    name: String(group.name || '自选').slice(0, 12),
+    list: Array.isArray(group.list) ? group.list.slice() : [],
+  });
+  save();
+  emitFavs();
+  return true;
+}
+
+/** 把品种加进指定分组（已存在就忽略），不切换当前分组 */
+export function addFavTo(sym, gid) {
+  const g = state.favGroups.find((x) => x.id === gid);
+  if (!g || g.list.includes(sym)) return false;
+  g.list.push(sym);
+  save();
+  emitFavs();
+  return true;
 }

@@ -252,3 +252,64 @@ export function openParams(anchor, current, defaults, onApply) {
   cur = pop;
   return pop;
 }
+
+/** 单行输入弹层：新建 / 重命名分组这类小输入，样式和参数弹层一套 */
+export function openPrompt(anchor, opts = {}) {
+  closePicker();
+  const {
+    title = '输入', label = '', value = '', placeholder = '', okText = '确定', onOk,
+  } = opts;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  const pop = document.createElement('div');
+  pop.className = 'popover params';
+  pop.innerHTML = `
+    <div class="pp-head">${esc(title)}</div>
+    <div class="pp-row"><label>${esc(label)}</label>
+      <span class="pp-wide"><input type="text" data-f="v" maxlength="12"
+        value="${esc(value)}" placeholder="${esc(placeholder)}" autocomplete="off"></span>
+    </div>
+    <div class="pp-foot">
+      <button class="chip" data-act="cancel">取消</button>
+      <button class="chip on" data-act="ok">${esc(okText)}</button>
+    </div>`;
+  document.body.appendChild(pop);
+
+  const r = anchor.getBoundingClientRect();
+  const W = pop.offsetWidth || 306;
+  const H = pop.offsetHeight || 120;
+  const left = Math.min(r.left, window.innerWidth - W - 10);
+  let top = r.bottom + 4;
+  if (top + H > window.innerHeight - 8) top = Math.max(8, r.top - H - 4);
+  pop.style.left = Math.max(6, left) + 'px';
+  pop.style.top = top + 'px';
+
+  const input = pop.querySelector('[data-f="v"]');
+  const submit = () => {
+    const v = input.value.trim();
+    if (!v) { input.focus(); return; }
+    if (onOk) onOk(v);
+    closePicker();
+  };
+
+  pop.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    if (b.dataset.act === 'ok') submit();
+    else closePicker();
+  });
+  pop.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closePicker(); }
+  });
+
+  setTimeout(() => {
+    document.addEventListener('mousedown', outside, true);
+    outsideBound = true;
+  }, 0);
+  setTimeout(() => { input.focus(); input.select(); }, 20);
+
+  anchorEl = anchor;
+  cur = pop;
+  return pop;
+}

@@ -1145,7 +1145,8 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   justify-content: start;
   min-width: 0;
 }
-.pp-nums input {
+.pp-nums input,
+.pp-wide input {
   width: 54px;
   height: 26px;
   padding: 0 4px;
@@ -1161,7 +1162,9 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 }
 .pp-nums input::-webkit-outer-spin-button,
 .pp-nums input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.pp-nums input:focus { outline: none; border-color: var(--accent); }
+.pp-nums input:focus, .pp-wide input:focus { outline: none; border-color: var(--accent); }
+.pp-wide { display: block; min-width: 0; }
+.pp-wide input { width: 100%; text-align: left; padding: 0 7px; }
 .pp-foot {
   display: flex;
   justify-content: flex-end;
@@ -1442,6 +1445,28 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
   text-transform: none;
   opacity: .75;
 }
+
+/* 分组名：点开切换 / 管理。名字是用户输的，别被 .w-group 的 uppercase 改掉 */
+.w-gname {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 0 3px;
+  margin-left: -3px;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .4px;
+  color: var(--muted);
+  text-transform: none;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.w-gname:hover { background: var(--hover); color: var(--accent); }
+.w-gname i { font-style: normal; font-size: 8px; opacity: .55; }
 
 .w-empty {
   padding: 6px 12px 10px;

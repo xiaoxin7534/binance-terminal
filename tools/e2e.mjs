@@ -1019,7 +1019,10 @@ test('行情条：单击选中 / 双击填格子 / 右键菜单', async (s) => {
   assert(r.clicked.on, '被点的那一项没高亮');
   assertEq(r.clicked.onCount, 1, '高亮项不是唯一一个');
   assertEq(r.dbl.cell0, 'SOLUSDT', '双击没把品种填进格子');
-  assertEq(r.labels.join(','), '在大图中打开,加入自选', '右键菜单项不对：' + r.labels.join(','));
+  // 菜单文案跟着当前分组名走（「加入「自选」」），只断言结构，别把分组名写死
+  assertEq(r.labels.length, 2, '右键菜单项数量不对：' + r.labels.join(','));
+  assertEq(r.labels[0], '在大图中打开', '右键菜单第一项不对：' + r.labels.join(','));
+  assert(r.labels[1].includes('自选'), '右键菜单没有加自选项：' + r.labels.join(','));
   assert(r.menuClosed, '菜单没有关掉');
 });
 
@@ -1274,57 +1277,54 @@ test('爆量徽标：阈值生效，倍数与手算一致', async (s) => {
       const pop = document.querySelector('.popover.params');
       pop.querySelector('[data-f="spike"]').value = ${v};
       pop.querySelector('[data-act="apply"]').click();
-      await new Promise(r=>setTimeout(r,500));
+      await new Promise(r=>setTimeout(r,450));
       return 1;
     `);
   };
 
-  // 1) 阈值拉到 20：无论当前量多大都不该有徽标（门控必须真的按参数走）
-  await setThr(20);
-  const hi = await s.ev(`
+  // 造一根确定的放量柱：把最后一根的成交额改成前 20 根均额的 5 倍。
+  // 不靠真实行情——所有格子的 1m K 线共享同一个分钟边界，刚过整点时
+  // 每格当前根都是刚开的，倍数同时接近 0，等真实放量会让用例随机失败。
+  const inject = async (mult) => s.ev(`
     const cells = window.__term.grid.cells.filter(c => c.mounted && c.bars && c.bars.length > 30);
     if (!cells.length) return null;
-    const shown = cells.filter(c => !c.volBadgeEl.hidden);
-    return { n: cells.length, shown: shown.length, thr: window.__term.state.indParams.spike };
+    const c = cells[0];
+    const n = c.bars.length;
+    if (c.__origQ == null) c.__origQ = c.bars[n-1][6];
+    let sum = 0;
+    for (let i=n-21;i<n-1;i++) sum += c.bars[i][6] || 0;
+    const avg = sum / 20;
+    c.bars[n-1][6] = avg * ${mult};
+    c.renderHead();
+    return { idx: c.index, avg, manual: c.volRatio(), text: c.volBadgeEl.textContent,
+             hidden: c.volBadgeEl.hidden, title: c.volBadgeEl.title,
+             spikeCls: c.el.classList.contains('spike') };
   `);
+
+  // 1) 阈值 20：注入 5 倍也不该显示（门控真的按参数走）
+  await setThr(20);
+  const hi = await inject(5);
   assert(hi, '没有已挂载且有 K 线的格子');
-  assertEq(hi.thr, 20, '阈值没写进 state');
-  assertEq(hi.shown, 0, `阈值 20 倍时仍有 ${hi.shown}/${hi.n} 个格子显示爆量`);
+  assert(hi.hidden, `阈值 20 倍时 5 倍放量仍显示徽标`);
+  assert(!hi.spikeCls, '阈值 20 倍时格子仍被标成爆量');
 
-  // 2) 阈值降到 1.2，等某格真的超过 1.2 倍（1m 的当前根随时可能滚到下一根，不能一次就断言）
-  await setThr(1.2);
-  let hit = null;
-  for (let i = 0; i < 60; i++) {
-    hit = await s.ev(`
-      const cells = window.__term.grid.cells.filter(c => c.mounted && c.bars && c.bars.length > 30);
-      let best = null, br = -1;
-      for (const c of cells) { const r = c.volRatio(); if (r > br) { br = r; best = c; } }
-      if (!best || br < 1.2) return null;
-      const n = best.bars.length;
-      let sum = 0;
-      for (let k=n-21;k<n-1;k++) sum += best.bars[k][6]||0;
-      const manual = sum > 0 ? (best.bars[n-1][6]||0) / (sum/20) : 0;
-      return { idx: best.index, ratio: br, manual,
-               hidden: best.volBadgeEl.hidden, text: best.volBadgeEl.textContent,
-               title: best.volBadgeEl.title, thr: window.__term.state.indParams.spike };
-    `);
-    if (hit) break;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  assert(hit, '30 秒内没有任何格子的成交额超过 20 根均值的 1.2 倍');
-  assertEq(hit.thr, 1.2, '阈值没写进 state');
-  assert(!hit.hidden, `倍数 ${hit.ratio.toFixed(2)} 已超过阈值，徽标却没出现`);
-  assert(hit.text.startsWith('爆量 ×'), '徽标文字不对：' + hit.text);
-  const shown = Number(hit.text.replace('爆量 ×', ''));
-  assert(Number.isFinite(shown), '徽标倍数不是数字：' + hit.text);
-  // 徽标保留 1 位小数（≥10 时取整），容差跟着放宽
-  const tol = shown >= 10 ? 0.6 : 0.06;
-  assert(Math.abs(shown - hit.manual) < tol,
-    `徽标倍数 ${shown} 与手算 ${hit.manual.toFixed(3)} 不一致`);
-  assert(hit.title.includes('倍') && hit.title.includes('成交额'), '悬停说明不完整：' + hit.title);
+  // 2) 阈值 3：同一根柱子应当触发，且倍数与手算一致
+  await setThr(3);
+  const r = await inject(5);
+  assert(!r.hidden, '阈值 3 倍时 5 倍放量没显示徽标');
+  assert(r.text.startsWith('爆量 ×'), '徽标文字不对：' + r.text);
+  const shown = Number(r.text.replace('爆量 ×', ''));
+  assert(Number.isFinite(shown), '徽标倍数不是数字：' + r.text);
+  const tol = shown >= 10 ? 0.6 : 0.06;   // 徽标保留 1 位小数，≥10 取整
+  assert(Math.abs(shown - r.manual) < tol,
+    `徽标倍数 ${shown} 与手算 ${r.manual.toFixed(3)} 不一致`);
+  assert(r.title.includes('倍') && r.title.includes('成交额'), '悬停说明不完整：' + r.title);
+  assert(r.spikeCls, '触发时格子没有 .spike 标记（窄格子只能靠它看出来）');
 
-  // 3) 恢复默认
+  // 3) 还原被改过的成交量，并把阈值恢复默认
   await s.ev(`
+    const cells = window.__term.grid.cells.filter(c => c.__origQ != null);
+    for (const c of cells) { c.bars[c.bars.length-1][6] = c.__origQ; delete c.__origQ; c.renderHead(); }
     document.querySelector('#ind-params-btn').click();
     await new Promise(r=>setTimeout(r,160));
     document.querySelector('.popover.params [data-act="reset"]').click();
@@ -1335,6 +1335,154 @@ test('爆量徽标：阈值生效，倍数与手算一致', async (s) => {
   `);
   const back = await s.ev('return window.__term.state.indParams.spike;');
   assertEq(back, 3, '恢复默认后阈值不是 3');
+});
+
+test('自选分组：新建 / 隔离 / 重命名 / 删除可撤销', async (s) => {
+  await s.ev(`
+    const w = document.querySelector('#watch');
+    if (w && w.classList.contains('hidden')) document.querySelector('#btn-watch').click();
+    await new Promise(r=>setTimeout(r,400));
+    return 1;
+  `);
+
+  // 1) 分组菜单能打开，且带新建/重命名入口
+  const menu = await s.ev(`
+    const btn = document.querySelector('.w-gname');
+    if (!btn) return null;
+    btn.click();
+    await new Promise(r=>setTimeout(r,160));
+    const pop = document.querySelector('.popover.menu');
+    return { items: [...pop.querySelectorAll('.menu-item')].map(b=>b.textContent.trim()),
+             name: btn.textContent.trim() };
+  `);
+  assert(menu, '自选栏没有分组按钮 .w-gname');
+  assert(menu.items.some((t) => t.includes('新建分组')), '菜单缺「新建分组」：' + menu.items.join(' | '));
+  assert(menu.items.some((t) => t.includes('重命名')), '菜单缺「重命名」：' + menu.items.join(' | '));
+
+  // 2) 新建分组 → 自动切过去、列表为空
+  const created = await s.ev(`
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b=>b.textContent.includes('新建分组')).click();
+    await new Promise(r=>setTimeout(r,220));
+    const pop = document.querySelector('.popover.params');
+    if (!pop) return { ok:false };
+    pop.querySelector('[data-f="v"]').value = '测试组';
+    pop.querySelector('[data-act="ok"]').click();
+    await new Promise(r=>setTimeout(r,420));
+    const st = window.__term.state;
+    const g = st.favGroups.find(x=>x.id===st.favGroup);
+    return { ok:true, n: st.favGroups.length, name: g.name, favs: st.favs.length,
+             title: document.querySelector('.w-gname').textContent.trim(),
+             rows: document.querySelectorAll('#watch-list [data-s]').length };
+  `);
+  assert(created.ok, '新建分组的输入弹层没出现');
+  assertEq(created.n, 2, '分组数没变成 2');
+  assertEq(created.name, '测试组', '新分组名字不对');
+  assertEq(created.favs, 0, '新分组应该是空的');
+  assert(created.title.includes('测试组'), '自选栏标题没跟着换：' + created.title);
+
+  // 3) 行情条右键「加入其他分组」把当前品种加进新分组
+  const added = await s.ev(`
+    const it = document.querySelector('#tape [data-s]');
+    const sym = it.dataset.s;
+    it.dispatchEvent(new MouseEvent('contextmenu', { bubbles:true }));
+    await new Promise(r=>setTimeout(r,170));
+    const pop = document.querySelector('.popover.menu');
+    const hit = [...pop.querySelectorAll('.menu-item')].find(b=>b.textContent.includes('测试组'));
+    if (!hit) return { ok:false, items: [...pop.querySelectorAll('.menu-item')].map(b=>b.textContent.trim()) };
+    hit.click();
+    await new Promise(r=>setTimeout(r,420));
+    const st = window.__term.state;
+    const g = st.favGroups.find(x=>x.name==='测试组');
+    return { ok:true, sym, inGroup: g.list.includes(sym), rows: document.querySelectorAll('#watch-list [data-s]').length };
+  `);
+  assert(added.ok, '行情条右键里没有「测试组」：' + (added.items || []).join(' | '));
+  assert(added.inGroup, '右键加入分组没写进数据');
+  assert(added.rows >= 1, '加入后自选栏没出现这一行');
+
+  // 4) 切回「自选」，两组互不影响
+  const back = await s.ev(`
+    document.querySelector('.w-gname').click();
+    await new Promise(r=>setTimeout(r,170));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b=>b.textContent.trim().startsWith('自选')).click();
+    await new Promise(r=>setTimeout(r,360));
+    const st = window.__term.state;
+    const other = st.favGroups.find(x=>x.name==='测试组');
+    return { cur: st.favs.length, other: other.list.length,
+             title: document.querySelector('.w-gname').textContent.trim() };
+  `);
+  assert(back.cur >= 1, '切回后原分组自选丢了');
+  assertEq(back.other, 1, '另一个分组的自选被串改了');
+  assert(back.title.includes('自选'), '标题没切回「自选」：' + back.title);
+
+  // 5) 切到测试组并重命名
+  const renamed = await s.ev(`
+    document.querySelector('.w-gname').click();
+    await new Promise(r=>setTimeout(r,170));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b=>b.textContent.includes('测试组')).click();
+    await new Promise(r=>setTimeout(r,300));
+    document.querySelector('.w-gname').click();
+    await new Promise(r=>setTimeout(r,170));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b=>b.textContent.includes('重命名')).click();
+    await new Promise(r=>setTimeout(r,220));
+    const pop = document.querySelector('.popover.params');
+    if (!pop) return { ok:false };
+    pop.querySelector('[data-f="v"]').value = '改名组';
+    pop.querySelector('[data-act="ok"]').click();
+    await new Promise(r=>setTimeout(r,360));
+    const st = window.__term.state;
+    return { ok:true, names: st.favGroups.map(g=>g.name),
+             title: document.querySelector('.w-gname').textContent.trim() };
+  `);
+  assert(renamed.ok, '重命名弹层没出现');
+  assert(renamed.names.includes('改名组'), '重命名没生效：' + renamed.names.join(','));
+  assert(!renamed.names.includes('测试组'), '旧名字还在：' + renamed.names.join(','));
+  assert(renamed.title.includes('改名组'), '标题没跟着改名');
+
+  // 6) 删除当前分组 → 只剩一个，且有「撤销」
+  const del = await s.ev(`
+    document.querySelector('.w-gname').click();
+    await new Promise(r=>setTimeout(r,170));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b=>b.textContent.includes('删除')).click();
+    await new Promise(r=>setTimeout(r,420));
+    const st = window.__term.state;
+    const t = document.querySelector('.toast');
+    return { n: st.favGroups.length, names: st.favGroups.map(g=>g.name),
+             toast: t ? t.textContent : '', hasUndo: !!(t && t.querySelector('.toast-act')) };
+  `);
+  assertEq(del.n, 1, '删除后分组数应为 1');
+  assert(!del.names.includes('改名组'), '分组没删掉');
+  assert(del.hasUndo, '删除后没有「撤销」入口');
+  assert(del.toast.includes('改名组'), '提示里没写删的是哪个分组：' + del.toast);
+
+  // 7) 撤销 → 分组回来，名字和里面的自选都在
+  const undo = await s.ev(`
+    document.querySelector('.toast .toast-act').click();
+    await new Promise(r=>setTimeout(r,420));
+    const st = window.__term.state;
+    const g = st.favGroups.find(x=>x.name==='改名组');
+    return { n: st.favGroups.length, back: !!g, list: g ? g.list.length : -1,
+             saved: (JSON.parse(localStorage.getItem('binance-terminal.v1')||'{}').favGroups||[]).map(x=>x.name) };
+  `);
+  assertEq(undo.n, 2, '撤销后分组数应为 2');
+  assert(undo.back, '撤销没把分组放回来');
+  assertEq(undo.list, 1, '撤销后分组里的自选丢了');
+  assert(undo.saved.includes('改名组'), '分组没写进 localStorage：' + undo.saved.join(','));
+
+  // 8) 收拾干净：再删一次，回到单分组
+  await s.ev(`
+    document.querySelector('.w-gname').click();
+    await new Promise(r=>setTimeout(r,170));
+    const hit = [...document.querySelectorAll('.popover.menu .menu-item')].find(b=>b.textContent.includes('删除'));
+    if (hit) hit.click();
+    await new Promise(r=>setTimeout(r,300));
+    document.body.click();
+    await new Promise(r=>setTimeout(r,200));
+    return 1;
+  `);
+  const end = await s.ev('const st = window.__term.state; return { n: st.favGroups.length, cur: st.favGroup };');
+  assertEq(end.n, 1, '收尾后应只剩 1 个分组');
+  assertEq(end.cur, end.cur, '');
+  assert(end.cur, '当前分组丢了');
 });
 
 /* ================================================================== 执行 */

@@ -5,7 +5,7 @@ import {
   state, market, seedMarket, applyTicks, applyFunding, onFrame, save,
   setSectorLabels, sectorLabels, setRegionLabels,
   matchTab, matchMkt, SECTOR_KEYS, TAB_KEYS, TAPE_SYMBOLS,
-  isFav, toggleFav, IND_DEFAULTS,
+  isFav, toggleFav, IND_DEFAULTS, addFavTo, currentFavGroup,
 } from './core/store.js';
 import { openMenu, openParams } from './core/picker.js';
 import { fmtPrice, fmtPct, dirClass, fmtCompact } from './core/fmt.js';
@@ -180,13 +180,26 @@ function bindTape() {
     if (!it) return;
     e.preventDefault();
     const sym = it.dataset.s;
-    openMenu(it, [
+    const cur = currentFavGroup();
+    const items = [
       { key: 'big', label: '在大图中打开' },
       { divider: true },
-      { key: 'fav', label: isFav(sym) ? '移出自选' : '加入自选' },
-    ], '', (k) => {
+      { key: 'fav', label: isFav(sym) ? `移出「${cur.name}」` : `加入「${cur.name}」` },
+    ];
+    // 有多个分组时，顺手给出「加到别的分组」的入口
+    const others = state.favGroups.filter((g) => g.id !== cur.id);
+    if (others.length) {
+      items.push({ header: '加入其他分组' });
+      for (const g of others) items.push({ key: 'g:' + g.id, label: g.name, count: g.list.length });
+    }
+    openMenu(it, items, '', (k) => {
       if (k === 'big') openBig(sym, state.interval);
       else if (k === 'fav') toggleFav(sym);
+      else if (k.startsWith('g:')) {
+        const gid = k.slice(2);
+        const g = state.favGroups.find((x) => x.id === gid);
+        if (addFavTo(sym, gid) && toast) toast(`已加入「${g ? g.name : '分组'}」`);
+      }
     });
   });
 }
