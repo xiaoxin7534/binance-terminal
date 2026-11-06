@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 
 const DEFAULT_ROOT = 'D:/WorkBuddy AI/.cache';
 const PREFIXES = ['e2e-', 'perf-', 'shot-'];
-const MAX_AGE_MS = 6 * 3600 * 1000;
+const MAX_AGE_MS = 10 * 60 * 1000;   // 10 分钟前的残留就可以清了
 
 let cachedRoot = null;
 
@@ -55,7 +55,7 @@ export function makeProfile(prefix) {
 
 /** 删 profile。Chrome 被 taskkill 之后还会占用文件一小会儿，必须重试；
  *  删不掉也不算错，下次启动 sweepOld() 会兜底。 */
-export async function removeProfile(dir, tries = 12) {
+export async function removeProfile(dir, tries = 25) {
   for (let i = 0; i < tries; i++) {
     try {
       rmSync(dir, { recursive: true, force: true });

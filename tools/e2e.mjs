@@ -14,7 +14,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProfile, removeProfile } from './_tmp.mjs';
 
@@ -1264,14 +1264,32 @@ let ws = null;
 const cleanup = async () => {
   try { ws && ws.close(); } catch (e) { /* ignore */ }
   if (chrome && !chrome.killed) {
-    if (process.platform === 'win32') {
-      spawn('taskkill', ['/PID', String(chrome.pid), '/T', '/F'], { stdio: 'ignore' });
-    } else {
-      chrome.kill('SIGKILL');
-    }
+    // 必须等 taskkill 真的退出：它只是发个信号，进程没死之前文件还是被占着，
+    // 这时候删 profile 会失败（原来就是 spawn 完立刻删，删不掉也不报错）
+    await new Promise((res) => {
+      try {
+        if (process.platform === 'win32') {
+          const k = spawn('taskkill', ['/PID', String(chrome.pid), '/T', '/F'], { stdio: 'ignore' });
+          k.on('exit', res);
+          k.on('error', res);
+        } else {
+          chrome.kill('SIGKILL');
+          res();
+        }
+      } catch (e) { res(); }
+    });
   }
-  await removeProfile(profile);
+  await sleep(300);        // 让 Chrome 的子进程（crashpad 之类）也退干净
+  if (!(await removeProfile(profile))) {
+    console.warn(`[e2e] 临时 profile 没删掉，下次启动会自动清理：${profile}`);
+  }
 };
+
+// 最后一道保险：进程退出前再同步删一次。异步清理偶尔赶不上 Chrome 释放句柄，
+// 而 exit 钩子里同步删是最接近"真的退出"的时机。
+process.on('exit', () => {
+  try { rmSync(profile, { recursive: true, force: true }); } catch (e) { /* 交给下次 sweepOld */ }
+});
 
 process.on('SIGINT', () => { cleanup(); process.exit(130); });
 
