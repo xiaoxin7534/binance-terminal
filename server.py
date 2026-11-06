@@ -76,7 +76,8 @@ UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BinanceTerminal/1.0"
 TOP_TICKER_STREAMS = 260        # rebalance 兜底保留的成交额前 N
 MAX_TICKER_STREAMS = 950        # 单连接最多订阅的 ticker 流（币安上限 1024）
 QUOTE_ASSETS = ("USDT", "USDC")  # 支持的计价货币
-TICK_PUSH_INTERVAL = 0.7        # tick 合并推送间隔（秒）
+TICK_PUSH_INTERVAL = 0.7        # 全市场 tick 合并推送间隔（秒）
+FAST_TICK_INTERVAL = 0.15       # 焦点品种（当前在看的那几十个）的推送间隔
 TICKER_SAVE_INTERVAL = 25       # 快照落盘间隔（秒）
 
 SEED_SYMBOLS = [
@@ -1829,19 +1830,35 @@ def push_loop():
     last_rebalance = time.time()
     last_snap = time.time()
     last_kl_save = time.time()
+    last_slow = time.time()
+
+    def row(sym):
+        t = HUB.tickers.get(sym)
+        if not t:
+            return None
+        return [sym, t["l"], t["chgp"], t["h"], t["lo"], t["v"], t["qv"],
+                round(HUB.speed(sym, t["l"]), 3)]
+
     while True:
-        time.sleep(TICK_PUSH_INTERVAL)
+        time.sleep(FAST_TICK_INTERVAL)
+        now = time.time()
+
+        # 焦点品种（客户端显式订阅的那几十个：格子/大图/自选/行情条）单独高频推，
+        # 让正在看的东西跟手；全市场仍然 0.7 秒一批，免得 1800 个币把带宽打满。
+        # 注意这里**不清 dirty**：慢批次还会把它们带上，重复推一次没有副作用。
         with HUB.lock:
-            batch = []
-            for sym in HUB.dirty:
-                t = HUB.tickers.get(sym)
-                if t:
-                    batch.append([sym, t["l"], t["chgp"], t["h"], t["lo"], t["v"], t["qv"],
-                                  round(HUB.speed(sym, t["l"]), 3)])
+            fast = [r for r in (row(sym) for sym in HUB.dirty if sym in HUB.explicit) if r]
+        if fast:
+            HUB.broadcast({"t": "tk", "d": fast})
+
+        if now - last_slow < TICK_PUSH_INTERVAL:
+            continue
+        last_slow = now
+        with HUB.lock:
+            batch = [r for r in (row(sym) for sym in HUB.dirty) if r]
             HUB.dirty.clear()
         if batch:
             HUB.broadcast({"t": "tk", "d": batch})
-        now = time.time()
         if now - last_snap > 10:
             last_snap = now
             with HUB.lock:
@@ -1977,7 +1994,7 @@ def get_klines_before(perp, sym, iv, limit, before):
     return raw
 
 
-def get_klines(perp, sym, iv, limit, prefetch=False):
+def get_klines(perp, sym, iv, limit, prefetch=False, bg=False):
     global _klines_dirty
     key = ("f:" if perp else "s:") + sym + "|" + iv
     step = IV_MS.get(iv, 60000)
@@ -1993,6 +2010,17 @@ def get_klines(perp, sym, iv, limit, prefetch=False):
             with _klines_lock:
                 KLINES[key] = ent
     if ent and now - ent["ts"] < ttl and len(ent["bars"]) >= min(limit, 50):
+        return ent["bars"][-limit:]
+
+    # 过期了但手上有一份完整数据：先把旧的给前端（最后一根有 K 线流实时补），
+    # 后台再去补缺口。原来这里会同步等币安，切回一个 30 秒没看的币就要多等 0.3~0.8 秒。
+    # 只差一两根时才这么做：差得多说明中间断档了，K 线流补不回来，必须同步拉全。
+    missing = ((now * 1000 - ent["bars"][-1][0]) / step) if (ent and ent["bars"]) else 999
+    if (ent and not bg and not prefetch and missing <= 2
+            and len(ent["bars"]) >= min(limit, 50)):
+        threading.Thread(
+            target=lambda: get_klines(perp, sym, iv, limit, prefetch=False, bg=True),
+            daemon=True).start()
         return ent["bars"][-limit:]
 
     bars = ent["bars"] if ent else []
@@ -2356,6 +2384,7 @@ class Handler(BaseHTTPRequestHandler):
                         "fut": FUTURES.state if FUTURES else "off",
                         "futdepth": FUT_DEPTH.state if FUT_DEPTH else "off",
                         "depth": HUB.depth_symbol or "",
+                        "trades": HUB.trade_symbol or "",
                     })
             return self.static(u.path)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):

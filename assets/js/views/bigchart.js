@@ -727,6 +727,8 @@ export class BigChart {
     this.oiData = null;
     this.oiCache = null;        // { key: 'sym|period', rows } 后台预取的持仓量
     this.oiPrefetchTimer = 0;
+    this.livePx = null;      // 最新成交价（逐笔 / K 线收盘），用来驱动头部报价
+    this.quoteTimer = 0;
 
     this.body = root.querySelector('.bc-body');
     // 复位按钮挂在图表格子里，不能挂在 .bc-body —— 那里面还含右侧盘口栏，
@@ -1136,6 +1138,7 @@ export class BigChart {
     if (!sym) return;
     const same = this.isOpen() && this.symbol === sym && this.interval === (iv || this.interval);
     const wasOpen = this.isOpen();
+    if (this.symbol !== sym) this.livePx = null;
     this.symbol = sym;
     if (iv && IVS.includes(iv)) this.interval = iv;
 
@@ -1172,6 +1175,11 @@ export class BigChart {
     }
     clearTimeout(this.cvdTimer);
     clearTimeout(this.cvdPaneTimer);
+    if (this.quoteTimer) {
+      clearTimeout(this.quoteTimer);
+      this.quoteTimer = 0;
+    }
+    this.livePx = null;
     this.cvdTimer = 0;
     this.cvdSeries = null;
     if (this.cell) {
@@ -1208,7 +1216,12 @@ export class BigChart {
 
     this.bindChart();
     // K 线到位 / 实时更新时刷新 CVD（节流在 scheduleCVD 里）
-    cell.onData = () => this.scheduleCVD();
+    cell.onData = () => {
+      this.scheduleCVD();
+      // 详情面板关着时没有逐笔流，K 线收盘是手上最新的价
+      const c = this.cell;
+      if (c && c.closes.length) this.setLivePx(c.closes[c.closes.length - 1]);
+    };
     cell.extraPanes = (panes) => {
       const h = 76;
       if (this.cvdSeries && panes[2] && panes[2].setHeight) panes[2].setHeight(h);
@@ -1285,10 +1298,15 @@ export class BigChart {
     const r = market.get(this.symbol);
     if (!r || !this.pxEl) return;
     const dp = dpOf(this.symbol);
-    const cls = dirClass(r.chgp);
-    this.pxEl.textContent = fmtPrice(r.l, dp);
+    const live = this.livePx;
+    // 8 秒没新的逐笔就退回行情快照，免得流断了以后价格卡死在一个旧值上
+    const fresh = live && live.s === this.symbol && performance.now() - live.at < 8000;
+    const px = fresh ? live.p : r.l;
+    const chgp = (fresh && r.o) ? ((px - r.o) / r.o) * 100 : r.chgp;
+    const cls = dirClass(chgp);
+    this.pxEl.textContent = fmtPrice(px, dp);
     this.pxEl.className = 'bc-px ' + cls;
-    this.chgEl.textContent = fmtPct(r.chgp);
+    this.chgEl.textContent = fmtPct(chgp);
     this.chgEl.className = 'bc-chg ' + cls;
   }
 
@@ -1355,6 +1373,22 @@ export class BigChart {
 
   onTrade(msg) {
     if (this.showDetail) this.detailPanel.onTrade(msg);
+    // 头部报价直接吃逐笔：行情快照是 0.7 秒一批、币安 ticker 本身 1 秒一次，
+    // 而盘口 100ms、成交实时，三者会互相打架
+    if (msg && msg.s === this.symbol) this.setLivePx(msg.p);
+  }
+
+  /** 记录一个"更实时"的价（逐笔或 K 线收盘），合并后再刷头部。
+   *  用定时器而不是 rAF：窗口在后台/最小化时 rAF 会被节流到 1Hz 甚至暂停，
+   *  头部就会落后一拍（实测差 4~5bps）。50ms 节流对肉眼已经足够。 */
+  setLivePx(p) {
+    if (!(p > 0)) return;
+    this.livePx = { s: this.symbol, p, at: performance.now() };
+    if (this.quoteTimer) return;
+    this.quoteTimer = setTimeout(() => {
+      this.quoteTimer = 0;
+      this.syncQuote();
+    }, 50);
   }
 
   applyTheme() {

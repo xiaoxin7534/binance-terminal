@@ -1155,10 +1155,18 @@ export class Cell {
     const r = market.get(this.symbol);
     if (!r) return;
     const dp = dpOf(this.symbol);
-    const cls = dirClass(r.chgp);
-    this.priceEl.textContent = fmtPrice(r.l, dp);
+    // 价格优先用最后一根 K 线的收盘：K 线流（250ms~1s）比行情快照新
+    // （服务端 0.7 秒一批 + 币安 ticker 1 秒一次），而且和图上最后一根蜡烛永远一致，
+    // 不会出现「表头 75908 / 盘口 75935」这种自己跟自己矛盾的情况
+    const key = this.symbol + '|' + this.interval;
+    const last = (this.loadedKey === key && this.closes.length)
+      ? this.closes[this.closes.length - 1] : null;
+    const px = last == null ? r.l : last;
+    const chgp = (last != null && r.o) ? ((px - r.o) / r.o) * 100 : r.chgp;
+    const cls = dirClass(chgp);
+    this.priceEl.textContent = fmtPrice(px, dp);
     this.priceEl.className = 'cell-price ' + cls;
-    this.chgEl.textContent = fmtPct(r.chgp);
+    this.chgEl.textContent = fmtPct(chgp);
     this.chgEl.className = 'cell-chg ' + cls;
     this.hEl.textContent = fmtPrice(r.h, dp);
     this.loEl.textContent = fmtPrice(r.lo, dp);

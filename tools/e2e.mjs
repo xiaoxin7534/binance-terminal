@@ -1842,6 +1842,64 @@ test('绘图：射线 / 水平射线 / 文本标注', async (s) => {
   `);
 });
 
+test('大图：头部报价跟逐笔一致，面板收起仍订阅逐笔', async (s) => {
+  await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,300));
+    window.__term.big.open('BTCUSDT@f');
+    window.__term.syncSubs();            // 走 app 正常路径，登记订阅
+    await new Promise(r=>setTimeout(r,2600));
+    return 1;
+  `);
+
+  // 1) 头部价格应当跟着最后一笔成交，而不是 0.7 秒一批的行情快照
+  const r = await s.ev(`
+    const b = window.__term.big;
+    const dp = b.detailPanel;
+    const num = (t) => Number(String(t).replace(/,/g, ''));
+    // 头部允许最多落后两笔成交（50ms 节流 + 采样时机），
+    // 但绝不能像以前那样跟的是 0.7 秒一批的行情快照
+    let worst = 0, n = 0;
+    for (let i = 0; i < 30; i++) {
+      const list = (dp.trades || []).slice(0, 3).filter(t => t && t.p);
+      if (list.length) {
+        const hdr = num(b.pxEl.textContent);
+        const best = Math.min(...list.map(t => Math.abs(hdr - t.p) / t.p * 1e4));
+        worst = Math.max(worst, best);
+        n++;
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return { worst, n, hdr: b.pxEl.textContent, last: dp.trades[0] && dp.trades[0].p };
+  `);
+  assert(r.n >= 10, '逐笔太少，用例前提不成立：' + r.n);
+  // 以前头部跟的是行情快照，和逐笔最多差到 30bps；现在应当基本一致
+  assert(r.worst < 1.5, `头部与最近三笔成交最少差 ${r.worst.toFixed(2)}bps（应 < 1.5）`);
+
+  // 2) 收起右侧盘口栏后，逐笔订阅不能断（它是头部价格唯一的高频来源）
+  const off = await s.ev(`
+    const b = window.__term.big;
+    b.setDetail(false);
+    window.__term.syncSubs();
+    await new Promise(r=>setTimeout(r,900));
+    const st = await (await fetch('/api/status')).json();
+    return { trades: st.trades, depth: st.depth, show: b.showDetail };
+  `);
+  assertEq(off.show, false, '盘口栏没关上');
+  assertEq(off.trades, 'BTCUSDT@f', '收起面板后逐笔订阅被取消了：' + off.trades);
+  assertEq(off.depth, '', '收起面板后盘口还在订阅（浪费带宽）：' + off.depth);
+
+  // 3) 再打开，恢复原状
+  await s.ev(`
+    window.__term.big.setDetail(true);
+    window.__term.syncSubs();
+    await new Promise(r=>setTimeout(r,700));
+    window.__term.big.close();
+    await new Promise(r=>setTimeout(r,400));
+    return 1;
+  `);
+});
+
 /* ================================================================== 执行 */
 const server = await checkServer();
 const bin = findChrome();

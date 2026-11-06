@@ -385,7 +385,10 @@ function syncSubs() {
       tickers: [...tickers],
       klines,
       depth: wantBook ? bookSym : null,
-      trades: wantBook ? bookSym : null,
+      // 逐笔**始终**订阅：它是价格最快的来源（实测 35 条/秒），
+      // 头部报价、格子表头都靠它，不能因为详情面板收起就断掉。
+      // 盘口（100ms 一帧、每帧 20 档）才是真的只有看着才需要。
+      trades: bookSym || null,
     });
   }, 180);
 }
