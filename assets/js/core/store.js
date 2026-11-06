@@ -35,6 +35,7 @@ const DEFAULTS = {
   sector: null,
   region: null,        // 股票市场细分：US / HK / CN / KR / JP，null = 不限
   notify: false,       // 新币上架是否弹系统通知（页面内提示始终有）
+  cvd: true,           // 大图是否叠加 CVD（累计买卖差），默认开
   gridSector: 'all',
   colOrder: null,
   search: '',
@@ -91,7 +92,7 @@ export function save() {
         sync: state.sync, cells: state.cells, favs: state.favs,
         detailOpen: state.detailOpen,
         selected: state.selected, mkt: state.mkt, tab: state.tab, sector: state.sector,
-        region: state.region, notify: state.notify,
+        region: state.region, notify: state.notify, cvd: state.cvd,
         gridSector: state.gridSector, colOrder: state.colOrder, sort: state.sort,
         alert: state.alert, uiV: 3,
         listDetailOpen: state.listDetailOpen, detailWidth: state.detailWidth,

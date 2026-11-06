@@ -621,6 +621,10 @@ export class BigChart {
     this.showDetail = !!state.bcDetailOpen;   // 默认打开，用户关过才记成 false
     this.oiOn = false;
     this.oiSeries = null;
+    this.cvdOn = state.cvd !== false;   // CVD 默认打开
+    this.cvdSeries = null;
+    this.cvdTimer = 0;
+    this.cvdPaneTimer = 0;
     this.oiData = null;
     this.oiCache = null;        // { key: 'sym|period', rows } 后台预取的持仓量
     this.oiPrefetchTimer = 0;
@@ -664,6 +668,11 @@ export class BigChart {
     this.root.querySelector('#bc-close').addEventListener('click', () => this.close());
     this.root.querySelector('#bc-reset').addEventListener('click', () => this.resetView());
     this.root.querySelector('#bc-oi-btn').addEventListener('click', () => this.setOI(!this.oiOn));
+    const cvdBtn = this.root.querySelector('#bc-cvd-btn');
+    if (cvdBtn) {
+      cvdBtn.classList.toggle('on', this.cvdOn);
+      cvdBtn.addEventListener('click', () => this.setCVD(!this.cvdOn));
+    }
     this.root.querySelector('#bc-detail-btn').addEventListener('click', () => {
       this.setDetail(!this.showDetail);
       if (this.ctx.onDetailToggle) this.ctx.onDetailToggle(this.showDetail);
@@ -759,26 +768,86 @@ export class BigChart {
         priceLineVisible: false,
         lastValueVisible: true,
         priceFormat: { type: 'volume' },
-      }, 2);
+      }, this.oiPane());
     } catch (e) {
       this.oiSeries = null;
       return;
     }
-    this.sizeOIPane();
+    cell.schedulePaneHeights();
     this.loadOI();
   }
 
-  sizeOIPane() {
+  /** 持仓量放哪个 pane：CVD 开着就往后挪一位，两个都开时各占一格 */
+  oiPane() {
+    return this.cvdOn ? 3 : 2;
+  }
+
+  /* ---------------- CVD（累计买卖差） ----------------
+     用 K 线自带的「主动买成交量」算：每根 Δ = 2*tb - v，
+     从最左边那根开始累加就是 CVD 曲线。价格新高而 CVD 没跟上 = 买盘在撤，这是它最大的用处。
+     放在独立 pane 2，持仓量打开时挪到 pane 3。 */
+  setCVD(on) {
+    this.cvdOn = !!on;
+    state.cvd = this.cvdOn;
+    save();
+    const btn = this.root.querySelector('#bc-cvd-btn');
+    if (btn) btn.classList.toggle('on', this.cvdOn);
+    this.applyCVD();
+    this.applyOI();          // 持仓量的 pane 位置跟着变
+  }
+
+  applyCVD() {
     const cell = this.cell;
     if (!cell || !cell.chart) return;
-    clearTimeout(this.oiTimer);
-    this.oiTimer = setTimeout(() => {
-      if (!cell.chart || !this.oiSeries) return;
-      try {
-        const panes = cell.chart.panes();
-        if (panes[2] && panes[2].setHeight) panes[2].setHeight(88);
-      } catch (e) { /* ignore */ }
-    }, 260);
+    const chart = cell.chart;
+    if (!this.cvdOn || cell.intraday) {
+      if (this.cvdSeries) {
+        try { chart.removeSeries(this.cvdSeries); } catch (e) { /* ignore */ }
+        this.cvdSeries = null;
+      }
+      return;
+    }
+    const bars = cell.bars || [];
+    // 老缓存只有 7 个字段（没有主动买量），算不出来就不画，别画一条错的线
+    if (bars.length < 2 || !bars[0] || bars[0].length < 8) return;
+
+    let cum = 0;
+    const data = new Array(bars.length);
+    for (let i = 0; i < bars.length; i++) {
+      const b = bars[i];
+      cum += 2 * b[7] - b[5];
+      data[i] = { time: Math.floor(b[0] / 1000), value: cum };
+    }
+
+    if (this.cvdSeries) {
+      // 已经建好就只换数据：反复 add/remove 会让价格轴跟着跳
+      this.cvdSeries.setData(data);
+      return;
+    }
+    const LC = window.LightweightCharts;
+    try {
+      this.cvdSeries = chart.addSeries(LC.LineSeries, {
+        color: '#2f6fed',
+        lineWidth: 1.4,
+        priceLineVisible: false,
+        lastValueVisible: true,
+        priceFormat: { type: 'volume' },
+      }, 2);
+    } catch (e) {
+      this.cvdSeries = null;
+      return;
+    }
+    this.cvdSeries.setData(data);
+    cell.schedulePaneHeights();     // 新开一个 pane，等布局稳定后压回 76px
+  }
+
+  /** 实时 K 线每根都会触发 onData，CVD 是累计量，1 秒刷一次足够 */
+  scheduleCVD() {
+    if (!this.cvdOn || this.cvdTimer) return;
+    this.cvdTimer = setTimeout(() => {
+      this.cvdTimer = 0;
+      this.applyCVD();
+    }, 800);
   }
 
   async loadOI() {
@@ -808,7 +877,7 @@ export class BigChart {
     if (!this.oiSeries) return;
     this.oiData = rows;
     this.oiSeries.setData(rows);
-    this.sizeOIPane();
+    if (this.cell) this.cell.schedulePaneHeights();
   }
 
   /** 持仓量历史用哪个周期（分时图没 5m，统一按 5m 拉） */
@@ -879,6 +948,7 @@ export class BigChart {
     if (!this.cell) return;
     this.cell.setInterval(iv);
     this.bindChart();
+    if (this.cvdOn) this.applyCVD();
     if (this.oiOn) this.applyOI();
     if (this.draw) this.draw.setKey(this.drawKey());
     this.hoverIdx = -1;
@@ -935,6 +1005,10 @@ export class BigChart {
       this.draw.destroy();
       this.draw = null;
     }
+    clearTimeout(this.cvdTimer);
+    clearTimeout(this.cvdPaneTimer);
+    this.cvdTimer = 0;
+    this.cvdSeries = null;
     if (this.cell) {
       this.cell.destroy();
       this.cell = null;
@@ -968,6 +1042,15 @@ export class BigChart {
     this.cell = cell;
 
     this.bindChart();
+    // K 线到位 / 实时更新时刷新 CVD（节流在 scheduleCVD 里）
+    cell.onData = () => this.scheduleCVD();
+    cell.extraPanes = (panes) => {
+      const h = 76;
+      if (this.cvdSeries && panes[2] && panes[2].setHeight) panes[2].setHeight(h);
+      const oi = this.oiPane();
+      if (this.oiSeries && panes[oi] && panes[oi].setHeight) panes[oi].setHeight(h);
+    };
+    this.applyCVD();
 
     this.draw = new DrawLayer(cell, cell.host);
     this.draw.setKey(this.drawKey());

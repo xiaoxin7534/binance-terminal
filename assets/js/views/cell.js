@@ -493,13 +493,18 @@ export class Cell {
   }
 
   applyPaneHeights() {
-    if (!this.hasMacd || !this.chart) return;
+    if (!this.chart) return;
     try {
       const panes = this.chart.panes();
-      if (!panes || !panes[1] || !panes[1].setHeight) return;
-      // 指标窗占 22%，上下都限幅：小格里不至于把 K 线挤没，大格里也不至于太高
-      const h = Math.round(Math.max(56, Math.min(140, this.host.clientHeight * 0.22)));
-      panes[1].setHeight(h);
+      if (!panes) return;
+      if (this.hasMacd && panes[1] && panes[1].setHeight) {
+        // 指标窗占 22%，上下都限幅：小格里不至于把 K 线挤没，大格里也不至于太高
+        const h = Math.round(Math.max(56, Math.min(140, this.host.clientHeight * 0.22)));
+        panes[1].setHeight(h);
+      }
+      // 大图用这个钩子管额外副图（CVD / 持仓量）的高度。
+      // 必须挂在 Cell 的这套调度里：setHeight 会被内部布局覆盖，得在布局稳定后再设一次
+      if (this.extraPanes) this.extraPanes(panes);
     } catch (e) { /* ignore */ }
   }
 
@@ -588,12 +593,18 @@ export class Cell {
     this.mlegendEl.style.display = '';
     let th = 24;
     let mh = MACD_H;
+    let below = 0;
     try {
       th = this.chart.timeScale().height() || 24;
       const panes = this.chart.panes();
       if (panes && panes[1] && panes[1].getHeight) mh = panes[1].getHeight();
+      // pane 1 不一定贴着时间轴：大图还会往下挂 CVD / 持仓量副图，
+      // 不把下面这些的高度算进去，MACD 图例就会被顶到最底下
+      for (let i = 2; panes && i < panes.length; i++) {
+        if (panes[i] && panes[i].getHeight) below += panes[i].getHeight();
+      }
     } catch (e) { /* ignore */ }
-    this.mlegendEl.style.bottom = (th + mh - 18) + 'px';
+    this.mlegendEl.style.bottom = (th + below + mh - 18) + 'px';
     this.mlegendEl.style.top = 'auto';
   }
 
@@ -697,6 +708,7 @@ export class Cell {
     this.paintBars(silent);
     this.renderHead();
     this.renderLegend(this.times.length - 1);
+    if (this.onData) this.onData();     // 大图靠这个回调重建 CVD
   }
 
   /** 分时：k = [[ts, close, vol], ...] */
@@ -1017,7 +1029,7 @@ export class Cell {
     const isNew = t > lastT;
     if (isNew) {
       this.times.push(t);
-      this.bars.push([d[0], d[1], d[2], d[3], d[4], d[5], d[6]]);
+      this.bars.push([d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]]);
       this.closes.push(d[4]);
       if (this.times.length > 3000) {
         this.times.shift();
@@ -1025,7 +1037,7 @@ export class Cell {
         this.closes.shift();
       }
     } else {
-      this.bars[n - 1] = [d[0], d[1], d[2], d[3], d[4], d[5], d[6]];
+      this.bars[n - 1] = [d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]];
       this.closes[n - 1] = d[4];
     }
     this.candle.update({ time: t, open: d[1], high: d[2], low: d[3], close: d[4] });
@@ -1034,6 +1046,7 @@ export class Cell {
     this.updateTail();
     this.renderHead();
     if (this.legendIdx < 0) this.renderLegend(this.times.length - 1);
+    if (this.onData) this.onData();     // 大图靠这个回调增量刷新 CVD
   }
 
   updateTail() {

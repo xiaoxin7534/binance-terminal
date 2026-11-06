@@ -524,13 +524,14 @@ test('告警：阈值命中后进列表', async (s) => {
   assert(r.rows >= 1, '告警列表没渲染');
 });
 
-test('大图：持仓量叠加（pane 2）', async (s) => {
+test('大图：持仓量叠加（独立副图）', async (s) => {
   const r = await s.ev(`
     const big = window.__term.big;
     if (big.isOpen()) big.close();
     await new Promise(r=>setTimeout(r,300));
     big.open('BTCUSDT@f','1m');
     await new Promise(r=>setTimeout(r,3800));
+    const before = big.cell.chart.panes().length;
     document.querySelector('#bc-oi-btn').click();
     // 持仓量历史要走代理，单次 2~5 秒（行情抖动时更久），
     // 固定等 4 秒会偶发误报，这里改成轮询到数据到位为止
@@ -540,16 +541,19 @@ test('大图：持仓量叠加（pane 2）', async (s) => {
     }
     const panes = big.cell.chart.panes().length;
     const rows = big.oiData ? big.oiData.length : 0;
+    const oiPane = big.oiPane();
     document.querySelector('#bc-oi-btn').click();
     await new Promise(r=>setTimeout(r,500));
     const after = big.cell.chart.panes().length;
     big.close();
     await new Promise(r=>setTimeout(r,400));
-    return { panes, rows, after };
+    return { before, panes, rows, after, oiPane };
   `);
-  assertEq(r.panes, 3, '开持仓量后应该有 3 个窗格');
+  // CVD 默认开着，所以持仓量会落在第 4 格（index 3），不再是固定 pane 2
+  assertEq(r.panes, r.before + 1, `开持仓量后窗格没加一格：${r.before} -> ${r.panes}`);
+  assertEq(r.oiPane, r.panes - 1, '持仓量没落在最后一个窗格：' + r.oiPane);
   assert(r.rows > 10, '持仓量数据太少（等了 15 秒）：' + r.rows);
-  assert(r.after < 3, '关掉持仓量后窗格没减少');
+  assertEq(r.after, r.before, '关掉持仓量后窗格没回到原样');
 });
 
 test('K 线：拖到左边缘自动补更早的历史', async (s) => {
@@ -758,6 +762,67 @@ test('股票市场细分：菜单与筛选', async (s) => {
   assertEq(await s.ev('return window.__term.state.region;'), null, '用例结束没复位 region');
 });
 
+test('大图：CVD 默认打开且数值正确', async (s) => {
+  await s.ev(`document.querySelector('#tabs button[data-view="grid"]').click(); await new Promise(r=>setTimeout(r,500));
+    window.__term.big.open('BTCUSDT@f','5m'); await new Promise(r=>setTimeout(r,4000)); return 1;`);
+  const r = await s.ev(`
+    const b = window.__term.big;
+    const btn = document.querySelector('#bc-cvd-btn');
+    const bars = (b.cell && b.cell.bars) || [];
+    let cum = 0;
+    for (const x of bars) cum += 2 * x[7] - x[5];
+    let series = null;
+    try { series = b.cvdSeries ? b.cvdSeries.data() : null; } catch (e) { series = null; }
+    let panes = [];
+    try { panes = b.cell.chart.panes().map((p) => (p.getHeight ? p.getHeight() : -1)); } catch (e) { panes = []; }
+    const last = series && series.length ? series[series.length - 1].value : null;
+    return {
+      on: btn.classList.contains('on'),
+      hasSeries: !!b.cvdSeries,
+      bars: bars.length,
+      fields: bars[0] ? bars[0].length : 0,
+      seriesLen: series ? series.length : 0,
+      last, expect: cum,
+      state: window.__term.state.cvd,
+      panes,
+    };
+  `);
+  assert(r.on, 'CVD 按钮默认没打开');
+  assertEq(r.state, true, 'state.cvd 默认不是 true');
+  assert(r.hasSeries, '没有创建 CVD 曲线');
+  assertEq(r.fields, 8, 'K 线没带主动买量（应为 8 个字段）');
+  assert(r.bars > 50, 'K 线太少：' + r.bars);
+  assertEq(r.seriesLen, r.bars, 'CVD 点数与 K 线根数不一致');
+  assert(r.last !== null && Math.abs(r.last - r.expect) < 1e-6,
+    `CVD 末值与手算不符：${r.last} vs ${r.expect}`);
+  // 副图高度：CVD 那一格要压住，别把主图挤没了
+  assert(r.panes.length >= 3, '没有独立的 CVD 副图：' + JSON.stringify(r.panes));
+  assert(r.panes[2] >= 50 && r.panes[2] <= 110, 'CVD 副图高度异常：' + r.panes[2]);
+  assert(r.panes[0] > 280, '主图被压得太小：' + r.panes[0]);
+
+  const off = await s.ev(`
+    document.querySelector('#bc-cvd-btn').click();
+    await new Promise(r=>setTimeout(r,450));
+    const b = window.__term.big;
+    return { on: b.cvdOn, series: !!b.cvdSeries,
+             cls: document.querySelector('#bc-cvd-btn').classList.contains('on'),
+             state: window.__term.state.cvd };
+  `);
+  assert(!off.on && !off.series && !off.cls, '关掉 CVD 后曲线没拆掉');
+  assertEq(off.state, false, '关闭状态没记住');
+
+  const back = await s.ev(`
+    document.querySelector('#bc-cvd-btn').click();
+    await new Promise(r=>setTimeout(r,450));
+    const b = window.__term.big;
+    const ok = { on: b.cvdOn, series: !!b.cvdSeries };
+    b.close();
+    await new Promise(r=>setTimeout(r,500));
+    return ok;
+  `);
+  assert(back.on && back.series, '再打开 CVD 没恢复');
+});
+
 test('最近成交：主动买卖汇总 + 只看大单', async (s) => {
   await s.ev(`document.querySelector('#tabs button[data-view="list"]').click(); await new Promise(r=>setTimeout(r,900));
     const row = document.querySelector('.tbody-inner .row'); if (row) row.click();
@@ -959,6 +1024,9 @@ test('行情条：单击选中 / 双击填格子 / 右键菜单', async (s) => {
 test('自选：一键清空 + 撤销', async (s) => {
   const r = await s.ev(`
     const before = window.__term.state.favs.slice();
+    // 资金费率告警和清空提示共用一个 toast，告警恰好在 400ms 内触发会把提示顶掉
+    const alertWasOn = window.__term.state.alert.on;
+    window.__term.state.alert.on = false;
     const btn = document.querySelector('#watch-list [data-clear]');
     if (!btn) return { skip: true, before };
     btn.click();
@@ -972,6 +1040,7 @@ test('自选：一键清空 + 撤销', async (s) => {
     const undo = document.querySelector('.toast-act');
     if (undo) undo.click();
     await new Promise(r => setTimeout(r, 400));
+    window.__term.state.alert.on = alertWasOn;
     return { before, cleared, after: window.__term.state.favs.slice() };
   `);
   if (r.skip) return;

@@ -1479,7 +1479,7 @@ class StreamWorker(threading.Thread):
             self.hub.broadcast({"t": "k", "s": k["s"], "i": k["i"],
                                 "d": [k["t"], float(k["o"]), float(k["h"]), float(k["l"]),
                                       float(k["c"]), float(k["v"]), float(k["q"]),
-                                      1 if k["x"] else 0]})
+                                      float(k["V"]), 1 if k["x"] else 0]})
         elif e == "aggTrade":
             self.hub.broadcast({"t": "r", "s": data["s"], "p": float(data["p"]),
                                 "q": float(data["q"]), "m": 1 if data["m"] else 0,
@@ -1608,7 +1608,7 @@ class FuturesWorker(threading.Thread):
             self.hub.broadcast({"t": "k", "s": k["s"] + "@f", "i": k["i"],
                                 "d": [k["t"], float(k["o"]), float(k["h"]), float(k["l"]),
                                       float(k["c"]), float(k["v"]), float(k["q"]),
-                                      1 if k["x"] else 0]})
+                                      float(k["V"]), 1 if k["x"] else 0]})
         elif e == "aggTrade":
             self.hub.broadcast({"t": "r", "s": data["s"] + "@f", "p": float(data["p"]),
                                 "q": float(data["q"]), "m": 1 if data["m"] else 0,
@@ -1891,7 +1891,10 @@ _perp_cache_lock = threading.Lock()
 
 
 def _fetch_klines(perp, sym, iv, limit, start=None, end=None):
-    """拉一段 K 线，返回 [[t, o, h, l, c, v, q], ...]
+    """拉一段 K 线，返回 [[t, o, h, l, c, v, q, tb], ...]
+
+    tb = 主动买成交量（币安 K 线的第 10 个字段）。
+    有了它前端才能算 CVD：每根柱子 Δ = 2*tb - v（主动买 - 主动卖），累加就是曲线。
 
     start：从这个时间往后拉（增量补）
     end：拉这个时间之前的（用户往左拖加载历史）
@@ -1917,7 +1920,7 @@ def _fetch_klines(perp, sym, iv, limit, start=None, end=None):
         else:
             raw = json.loads(cached_get(path, 2))
     return [[int(k[0]), float(k[1]), float(k[2]), float(k[3]),
-             float(k[4]), float(k[5]), float(k[7])] for k in raw]
+             float(k[4]), float(k[5]), float(k[7]), float(k[9])] for k in raw]
 
 
 def _merge_bars(old, new):
@@ -2149,8 +2152,10 @@ def _read_disk(key):
     try:
         with open(_kfile(key), "r", encoding="utf-8") as f:
             d = json.load(f)
-        if d.get("bars"):
-            return {"ts": d.get("ts", 0), "bars": d["bars"]}
+        bars = d.get("bars") or []
+        # 旧版本的缓存是 7 个字段（没有主动买量），CVD 算不出来，直接丢弃重拉
+        if bars and len(bars[0]) >= 8:
+            return {"ts": d.get("ts", 0), "bars": bars}
     except Exception:           # noqa: BLE001
         pass
     return None
