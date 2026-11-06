@@ -20,6 +20,8 @@ import time
 import traceback
 import urllib.request
 
+import app_paths
+
 APP_NAME = "看盘终端"
 # 默认只监听本机；要给 iPad / 手机看，设 BT_HOST=0.0.0.0（或双击「局域网访问.bat」）
 HOST = (os.environ.get("BT_HOST") or "127.0.0.1").strip()
@@ -50,14 +52,10 @@ def lan_ip():
 # 基础工具
 # --------------------------------------------------------------------------
 
-def data_dir():
-    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    p = os.path.join(base, "BinanceTerminal")
-    try:
-        os.makedirs(p, exist_ok=True)
-    except Exception:       # noqa: BLE001
-        pass
-    return p
+def data_dir(sub=""):
+    """数据目录：默认 %LOCALAPPDATA%\BinanceTerminal，
+    可用 BTERM_DATA 或 exe 旁的 data-dir.txt 挪到别的盘（详见 app_paths.py）"""
+    return app_paths.data_dir(sub)
 
 
 def setup_log():

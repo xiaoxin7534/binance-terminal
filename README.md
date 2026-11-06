@@ -143,8 +143,11 @@ node tools/shots.mjs before # 改界面前后各截一套图，存到 .shots/
 
 ### 数据存放与清理
 
-- 日志和行情缓存都在 `%LOCALAPPDATA%\BinanceTerminal\`
-  （`app.log` 是运行日志，`cache/` 是 K 线和全市场快照）。
+- 日志和行情缓存默认在 `%LOCALAPPDATA%\BinanceTerminal\`
+  （`app.log` 是运行日志，`cache/` 是 K 线和全市场快照，`window/` 是窗口用的 Chrome profile）。
+- **想挪到别的盘**：在 exe 旁边放一个 `data-dir.txt`，写一行目录（相对路径按 exe 所在目录算），
+  或者设环境变量 `BTERM_DATA`。整个目录加起来约 180MB（`window/` 占大头），
+  系统盘紧张时值得挪走。
 - 删掉整个目录 = 恢复出厂，下次启动重新拉数据，会慢一些，不影响功能。
 - 自选、布局、周期、绘图这些界面状态存在**浏览器 localStorage**（应用窗口内），不在上面那个目录。
 

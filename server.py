@@ -34,6 +34,8 @@ import socket
 import ssl
 import struct
 import sys
+
+import app_paths
 import threading
 import time
 import urllib.request
@@ -47,8 +49,9 @@ from urllib.parse import urlparse, parse_qs
 FROZEN = bool(getattr(sys, "frozen", False))
 if FROZEN:
     ROOT = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
-    CACHE_DIR = os.path.join(
-        os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "BinanceTerminal", "cache")
+    # 打包后缓存默认在 %LOCALAPPDATA%\BinanceTerminal\cache，
+    # 可用 BTERM_DATA / exe 旁的 data-dir.txt 挪到别的盘（见 app_paths.py）
+    CACHE_DIR = app_paths.data_dir("cache")
 else:
     ROOT = os.path.dirname(os.path.abspath(__file__))
     CACHE_DIR = os.path.join(ROOT, "cache")

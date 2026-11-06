@@ -15,3 +15,6 @@ Thumbs.db
 
 # 截图（tools/shots.mjs 的产物）
 .shots/
+
+# 每台机器自己的数据目录配置（写死路径，不进版本库）
+data-dir.txt

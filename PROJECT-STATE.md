@@ -2222,3 +2222,23 @@ MACD 图例、localStorage 落盘、弹层收起；最后恢复默认并断言�
 
 **教训**：`process.exit()` 之前的清理必须同步或 `await`，
 `setTimeout` 里做清理在脚本里等于没做——它不会报错，只会安静地漏。
+
+### 追加：应用自身的数据目录也能挪走（18:50）
+
+查测试缓存时顺手量了应用自己的目录：`%LOCALAPPDATA%\BinanceTerminal` **183MB**，
+其中 `window/`（窗口用的 Chrome profile）161MB、`cache/`（K 线 + 快照）22MB。
+这个体积对系统盘紧张的用户同样是负担，所以做成可配置：
+
+- 新增 `app_paths.py`：`data_dir(sub)` 的解析顺序是
+  `BTERM_DATA` 环境变量 → exe（或源码）同目录/上一级目录的 `data-dir.txt` → `%LOCALAPPDATA%\BinanceTerminal`。
+  相对路径按 exe 目录解析，便携版可以直接写 `data`。
+- `desktop.py` 的 `data_dir()` 改为委托；`server.py` 打包分支的 `CACHE_DIR` 也走它。
+- `data-dir.txt` **写进 .gitignore**：里面是每台机器的绝对路径，不该进版本库。
+- README「数据存放与清理」和 `packaging/使用说明.txt` 都补了怎么挪。
+
+本机已经生效：`data-dir.txt` 指向 `D:/WorkBuddy AI/.cache/app`，
+原来 C 盘的 183MB 已整体搬过去（不是复制，`%LOCALAPPDATA%\BinanceTerminal` 现在是空的）。
+exe 已重打（18:49），`Analysis-00.toc` 里确认 `app_paths` 进了包。
+
+**没改默认值**：别人拿到 exe 不写配置文件时，行为还是 `%LOCALAPPDATA%`——
+换机器、只读目录、多用户共用这些场景都还成立。
