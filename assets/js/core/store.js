@@ -15,6 +15,7 @@ export const TAPE_SYMBOLS = [
 const DEFAULTS = {
   view: 'grid',
   theme: 'light',
+  font: 'pingfang',    // 界面字体：pingfang / yahei / system
   watchOpen: true,     // 左侧自选栏
   layout: '4x2',
   rows: 0,             // 0=跟随布局行数，N=固定 N 行，-1=铺满当前筛选的全部品种
@@ -83,7 +84,8 @@ export function save() {
   saveTimer = setTimeout(() => {
     try {
       localStorage.setItem(LS_KEY, JSON.stringify({
-        view: state.view, theme: state.theme, watchOpen: state.watchOpen,
+        view: state.view, theme: state.theme, font: state.font,
+        watchOpen: state.watchOpen,
         layout: state.layout, rows: state.rows,
         interval: state.interval, indicators: state.indicators,
         sync: state.sync, cells: state.cells, favs: state.favs,

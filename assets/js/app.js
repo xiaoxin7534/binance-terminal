@@ -67,6 +67,50 @@ function applyTheme(theme, persist = true) {
   if (big) big.applyTheme();
 }
 
+/* --------------------------------------------------------------- 界面字体 */
+const FONT_LABELS = {
+  pingfang: '苹方 PingFang',
+  yahei: '微软雅黑',
+  system: '系统默认（Segoe UI）',
+};
+/* 字体是否真的装在这台机器上 —— 用画布量文字宽度对比 fallback，
+   比 document.fonts.check 可靠：后者对「系统里没声明过的字体」经常误报 true */
+function hasFont(name) {
+  try {
+    const c = document.createElement('canvas').getContext('2d');
+    const probe = 'mmmmmmmmmm中文0123456789';
+    c.font = '64px monospace';
+    const base = c.measureText(probe).width;
+    c.font = `64px "${name}", monospace`;
+    return c.measureText(probe).width !== base;
+  } catch (e) {
+    return false;
+  }
+}
+function fontAvailable(key) {
+  if (key === 'pingfang') {
+    // 两个来源都算：系统里装了苹方，或者把 woff2 丢进 assets/css/fonts/ 由 @font-face 加载
+    if (hasFont('PingFang SC')) return true;
+    try { return document.fonts.check('12px PingFangLocal'); } catch (e) { return false; }
+  }
+  if (key === 'yahei') return hasFont('Microsoft YaHei');
+  return true;                       // 系统默认总能用
+}
+function applyFont(key, notify = false) {
+  const k = FONT_LABELS[key] ? key : 'pingfang';
+  document.documentElement.dataset.font = k;
+  state.font = k;
+  save();
+  // 图表的坐标轴文字也吃这个字体，切完要让它们重画一次
+  if (grid) grid.applyTheme();
+  if (detail) detail.applyTheme();
+  if (gridDetail) gridDetail.applyTheme();
+  if (big) big.applyTheme();
+  if (notify && !fontAvailable(k)) {
+    toast(`本机没装「${FONT_LABELS[k]}」，已自动用微软雅黑显示`);
+  }
+}
+
 /* ------------------------------------------------------------------ 连接状态 */
 let connTimer = 0;
 function setConn(on) {
@@ -600,6 +644,18 @@ function bindToolbar() {
     else scanner.open();
   });
 
+  // 界面字体：菜单里直接标出本机装没装，避免"选了没反应"
+  const fontBtn = $('#btn-font');
+  if (fontBtn) {
+    fontBtn.addEventListener('click', () => {
+      const items = Object.keys(FONT_LABELS).map((k) => ({
+        key: k,
+        label: FONT_LABELS[k] + (fontAvailable(k) ? '' : '（未安装）'),
+      }));
+      openMenu(fontBtn, items, state.font, (k) => applyFont(k, true));
+    });
+  }
+
   $('#btn-alerts').addEventListener('click', () => {
     if (alerts.isOpen()) alerts.close();
     else alerts.open();
@@ -705,6 +761,10 @@ async function refreshMarket() {
 
 async function boot() {
   applyTheme(state.theme, false);
+  // 换了机器 / 首次运行：选中的字体不存在就落到雅黑，
+  // 免得菜单里勾着「苹方（未安装）」而屏幕上是别的字体
+  if (state.font === 'pingfang' && !hasFont('PingFang SC')) state.font = 'yahei';
+  applyFont(state.font, false);
 
   // 行情快照先发出去。GridView 一构造就会给 8 个格子发 K 线请求，
   // 不抢先发的话 /api/market 会被挤到第 9 位，表头数字要等 1 秒才出来。

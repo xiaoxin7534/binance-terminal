@@ -326,7 +326,7 @@ export class DetailPanel {
         background: { type: 'solid', color: cv('--panel') },
         textColor: cv('--muted'),
         fontSize: 9,
-        fontFamily: '"Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif',
+        fontFamily: cv('--font'),
         attributionLogo: false,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: dark ? 'rgba(255,255,255,.05)' : 'rgba(15,23,42,.05)' } },
@@ -700,16 +700,33 @@ export class DetailPanel {
     }
     const hist = raw.slice(-9);      // 面板窄，9 根刚好放得下
     const max = Math.max(...hist.map((x) => Math.abs(x[1])), 0.0001);
-    el.innerHTML = hist.map(([t, r], i) => {
-      // 费率多数在 0.01% 附近，线性缩放会全变成一条细线，用 0.55 次幂拉开差距
-      const hgt = Math.max(3, Math.round(Math.pow(Math.abs(r) / max, 0.55) * 24));
+    // 有负费率时零轴放中间（正柱向上、负柱向下），全是正的就把零轴放底部，多用一倍高度
+    const hasNeg = hist.some((x) => x[1] < 0);
+    el.classList.toggle('has-neg', hasNeg);
+    // 列宽由 grid 均分，标签文字再长也不会把某一列撑宽
+    el.style.gridTemplateColumns = `repeat(${hist.length}, minmax(0, 1fr))`;
+    // 日期标签：首根 + 每三根 + 末根，同一天只标一次（否则末尾会出现两个 11/6）
+    let lastLb = '';
+    const labels = hist.map(([t], i) => {
       const d = new Date(t);
       const lb = `${d.getMonth() + 1}/${d.getDate()}`;
-      // 只隔几个标一次日期：9 根全标会挤成一片，首尾 + 每三根最清楚
-      const show = i === 0 || i === hist.length - 1 || i % 3 === 0 ? lb : '';
+      const want = i === 0 || i === hist.length - 1 || i % 3 === 0;
+      if (want && lb !== lastLb) {
+        lastLb = lb;
+        return lb;
+      }
+      return '';
+    });
+    el.innerHTML = hist.map(([t, r], i) => {
+      // 线性比例：柱高就是「占最大值的百分比」。之前用 0.55 次幂拉开差距，
+      // 结果 24% 的费率画成 46% 高，看着像差不多 —— 这是"比例不对"的来源。
+      // 只留 3px 保底，免得极小的值完全看不见。
+      const h = Math.max(0.09, Math.abs(r) / max).toFixed(3);
+      const d = new Date(t);
+      const lb = `${d.getMonth() + 1}/${d.getDate()}`;
       return `<div class="fh-col" title="${lb} ${p2(d.getHours())}:00 ${r.toFixed(4)}%">
-        <div class="fh-bar"><i class="${r >= 0 ? 'up' : 'down'}" style="height:${hgt}px"></i></div>
-        <span>${show}</span></div>`;
+        <div class="fh-bar"><i class="${r >= 0 ? 'up' : 'down'}" style="--h:${h}"></i></div>
+        <span>${labels[i]}</span></div>`;
     }).join('');
   }
 
@@ -717,7 +734,11 @@ export class DetailPanel {
     if (!this.chart) return;
     const dark = document.documentElement.dataset.theme === 'dark';
     this.chart.applyOptions({
-      layout: { background: { type: 'solid', color: cv('--panel') }, textColor: cv('--muted') },
+      layout: {
+        background: { type: 'solid', color: cv('--panel') },
+        textColor: cv('--muted'),
+        fontFamily: cv('--font'),
+      },
       grid: { horzLines: { color: dark ? 'rgba(255,255,255,.05)' : 'rgba(15,23,42,.05)' } },
     });
     this.colorSpark();

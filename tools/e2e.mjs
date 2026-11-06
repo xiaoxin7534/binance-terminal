@@ -610,6 +610,8 @@ test('窗口缩放：工具栏按钮不被压扁', async (s) => {
     const r = await s.ev(`
       const btn = document.querySelector('#list-detail-btn');
       const tb = btn.closest('.list-toolbar');
+      const top = document.querySelector('.topbar');
+      const topOv = top.scrollWidth - top.clientWidth;
       const br = btn.getBoundingClientRect();
       const cs = getComputedStyle(btn);
       return {
@@ -617,6 +619,7 @@ test('窗口缩放：工具栏按钮不被压扁', async (s) => {
         w: Math.round(br.width),
         lines: Math.round(br.height / parseFloat(cs.lineHeight)),
         overflow: tb.scrollWidth - tb.clientWidth,
+        topOv,
         wrap: cs.whiteSpace,
       };
     `);
@@ -624,6 +627,7 @@ test('窗口缩放：工具栏按钮不被压扁', async (s) => {
     if (r.h > 26) bad.push(`${w}px 下「详情」高度 ${r.h}px（应为 24）`);
     if (r.w < 36) bad.push(`${w}px 下「详情」宽 ${r.w}px（被压扁）`);
     if (r.overflow > 1) bad.push(`${w}px 下工具栏溢出 ${r.overflow}px`);
+    if (r.topOv > 1) bad.push(`${w}px 下顶栏溢出 ${r.topOv}px`);
     if (r.wrap !== 'nowrap') bad.push(`${w}px 下 white-space=${r.wrap}`);
   }
   await s.send('Emulation.clearDeviceMetricsOverride');
@@ -752,6 +756,91 @@ test('股票市场细分：菜单与筛选', async (s) => {
     assert(!empty.text.includes('未就绪'), '把筛选空表误报成行情未就绪：' + empty.text);
   }
   assertEq(await s.ev('return window.__term.state.region;'), null, '用例结束没复位 region');
+});
+
+test('资金费率柱：等宽对齐，负费率向下画', async (s) => {
+  await s.ev(`document.querySelector('#tabs button[data-view="list"]').click(); await new Promise(r=>setTimeout(r,800));
+    const row = document.querySelector('.tbody-inner .row'); if (row) row.click();
+    await new Promise(r=>setTimeout(r,2600)); return 1;`);
+  const r = await s.ev(`
+    const now = Date.now(), day = 86400000;
+    // 造一组含负费率的历史：两根负的，一根极小
+    const hist = [[now-8*day,0.01],[now-7*day,0.005],[now-6*day,-0.004],[now-5*day,0.01],
+                  [now-4*day,0.0004],[now-3*day,0.01],[now-2*day,-0.01],[now-1*day,0.006],[now,0.003]];
+    window.__term.detail.renderFundHist(hist);
+    await new Promise(r=>setTimeout(r,200));
+    const el = document.querySelector('.fhist');
+    const cols = [...el.querySelectorAll('.fh-col')];
+    const bars = cols.map(c => c.querySelector('.fh-bar i'));
+    const frames = cols.map(c => c.querySelector('.fh-bar').getBoundingClientRect());
+    const rects = bars.map(b => b.getBoundingClientRect());
+    return {
+      hasNeg: el.classList.contains('has-neg'),
+      n: cols.length,
+      widths: [...new Set(rects.map(x => Math.round(x.width)))],
+      cols: cols.map((c, i) => ({
+        colC: Math.round(c.getBoundingClientRect().x + c.getBoundingClientRect().width / 2),
+        barC: Math.round(rects[i].x + rects[i].width / 2),
+        down: bars[i].classList.contains('down'),
+        top: Math.round(rects[i].top),
+        bottom: Math.round(rects[i].bottom),
+        zero: Math.round(frames[i].top + frames[i].height / 2),
+      })),
+      labels: cols.map(c => c.querySelector('span').textContent).filter(Boolean),
+    };
+  `);
+  assertEq(r.n, 9, '柱子数量不对');
+  assert(r.hasNeg, '有负费率时没加 has-neg');
+  assertEq(r.widths.length, 1, '柱子宽度不一致：' + JSON.stringify(r.widths));
+  assertEq(r.cols.filter((c) => c.down).length, 2, '负费率柱子数量不对');
+  for (const c of r.cols) {
+    assert(Math.abs(c.colC - c.barC) <= 1, `柱子没居中：列 ${c.colC} vs 柱 ${c.barC}`);
+    if (c.down) {
+      assert(c.top >= c.zero - 1, `负费率柱子没从零轴往下画：top ${c.top} < 零轴 ${c.zero}`);
+    } else {
+      assert(c.bottom <= c.zero + 1, `正费率柱子没从零轴往上画：bottom ${c.bottom} > 零轴 ${c.zero}`);
+    }
+  }
+  assert(r.labels.length <= 4, '日期标签太多，会挤：' + r.labels.join(','));
+  assert(new Set(r.labels).size === r.labels.length, '日期标签重复：' + r.labels.join(','));
+});
+
+test('界面字体：菜单切换 + 持久化', async (s) => {
+  const before = await s.ev('return window.__term.state.font;');
+  const menu = await s.ev(`
+    const b = document.querySelector('#btn-font');
+    if (!b) return { missing: true };
+    b.click();
+    await new Promise(r=>setTimeout(r,300));
+    return { items: [...document.querySelectorAll('.popover.menu .menu-item')].map(x => x.dataset.k) };
+  `);
+  assert(!menu.missing, '顶栏没有「字体」按钮');
+  assertEq(JSON.stringify(menu.items), JSON.stringify(['pingfang', 'yahei', 'system']), '字体菜单项不对');
+
+  const y = await s.ev(`
+    document.querySelector('.popover.menu .menu-item[data-k="yahei"]').click();
+    await new Promise(r=>setTimeout(r,350));
+    return {
+      attr: document.documentElement.dataset.font,
+      state: window.__term.state.font,
+      stack: getComputedStyle(document.documentElement).getPropertyValue('--font').trim(),
+      body: getComputedStyle(document.body).fontFamily,
+    };
+  `);
+  assertEq(y.attr, 'yahei', 'data-font 没切到雅黑');
+  assertEq(y.state, 'yahei', 'state.font 没记住');
+  assert(y.stack.toLowerCase().includes('yahei'), '--font 没跟着变：' + y.stack);
+  assert(y.body.toLowerCase().includes('yahei'), 'body 实际字体没变：' + y.body);
+
+  // 复位，别影响后面的用例
+  const back = await s.ev(`
+    document.querySelector('#btn-font').click();
+    await new Promise(r=>setTimeout(r,250));
+    document.querySelector('.popover.menu .menu-item[data-k="${before}"]').click();
+    await new Promise(r=>setTimeout(r,250));
+    return window.__term.state.font;
+  `);
+  assertEq(back, before, '字体没复位');
 });
 
 test('新品种通知：铃铛入口 + 页面内提示', async (s) => {

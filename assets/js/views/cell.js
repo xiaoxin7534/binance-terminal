@@ -320,7 +320,7 @@ export class Cell {
         background: { type: 'solid', color: C.panel },
         textColor: C.muted,
         fontSize: 10,
-        fontFamily: '"Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif',
+        fontFamily: cv('--font'),
         attributionLogo: false,
       },
       grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
@@ -1143,7 +1143,11 @@ export class Cell {
   applyTheme() {
     const C = themeColors();
     this.chart.applyOptions({
-      layout: { background: { type: 'solid', color: C.panel }, textColor: C.muted },
+      layout: {
+        background: { type: 'solid', color: C.panel },
+        textColor: C.muted,
+        fontFamily: cv('--font'),   // 跟着顶栏「字体」切换走
+      },
       grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
       crosshair: {
         vertLine: { color: C.cross, labelBackgroundColor: C.label },

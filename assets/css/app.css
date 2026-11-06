@@ -3,10 +3,15 @@
    ========================================================================== */
 
 :root {
-  /* 字体：苹方优先（Mac 自带），Windows 没有就退到最接近的黑体 */
-  --font: "PingFangLocal", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Source Han Sans SC",
-          -apple-system, "Segoe UI Variable Display", "Segoe UI",
-          "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  /* 界面字体：顶栏「字体」菜单切换，写在 <html data-font="..."> 上。
+     三套栈各自完整，切换时不依赖继承链，避免出现"换了一半"的混排。 */
+  --font-pingfang: "PingFangLocal", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+                   "Segoe UI", system-ui, sans-serif;
+  --font-yahei: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+                "Segoe UI", system-ui, sans-serif;
+  --font-system: -apple-system, "Segoe UI Variable Display", "Segoe UI",
+                 "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font: var(--font-pingfang);
 
   --bg: #eef1f6;
   --panel: #ffffff;
@@ -16,7 +21,9 @@
   --border-2: #d5dbe5;
   --text: #10151c;
   --text-2: #4a5563;
-  --muted: #8b95a3;
+  /* 次要文字：原来 #8b95a3 在白色面板上对比度只有 3.0:1，9~10px 的小字发虚。
+     调到 #6f7a88 约 4.4:1，视觉上仍是"灰字"，但小字号能看清了。 */
+  --muted: #6f7a88;
   /* 涨跌配色：美国模式（涨=绿 / 跌=红）。想切回 A 股习惯只改这一组 */
   --up: #0f9d63;
   --up-soft: rgba(15, 157, 99, .10);
@@ -44,6 +51,10 @@
   --mono: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Mono", Consolas,
           "Liberation Mono", monospace;
 }
+
+/* 字体切换：属性挂在 <html> 上，比 :root 多一个属性选择器，优先级够覆盖 */
+html[data-font="yahei"] { --font: var(--font-yahei); }
+html[data-font="system"] { --font: var(--font-system); }
 
 [data-theme="dark"] {
   --bg: #0a0d12;
@@ -87,9 +98,9 @@ html, body {
 body {
   background: var(--bg);
   color: var(--text);
-  font: 12px/1.45 var(--font);
+  /* 1.5 = 18px 整数行高：分数行高会让基线落在半像素上，中文小字号最容易糊 */
+  font: 12px/1.5 var(--font);
   font-variant-numeric: tabular-nums;
-  -webkit-font-smoothing: antialiased;
   transition: background .18s, color .18s;
 }
 
@@ -1159,37 +1170,63 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
 }
 .lsr-legend b { font-family: var(--mono); font-weight: 500; }
 
+/* 资金费率柱：等宽网格 + 零轴贴着柱底
+   原来用 flex + 固定 16px 的列宽，带日期标签的列被文字撑宽（min-width:auto），
+   于是每根柱子宽度都不一样、还整体错位。改成 grid 的 1fr 列，宽度只由容器决定。 */
 .fhist {
-  display: flex;
-  align-items: flex-end;
-  gap: 5px;
-  margin-top: 10px;
-  height: 52px;
-  position: relative;
-}
-/* 零轴：没有这条线，一排柱子看不出"高/低"是相对什么的 */
-.fhist::after {
-  content: '';
-  position: absolute;
-  left: 0; right: 0; bottom: 13px;
-  border-top: 1px dashed var(--border-2);
-  opacity: .8;
-  pointer-events: none;
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
 }
 .fh-col {
-  flex: 0 0 16px;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 3px;
-  height: 100%;
+  gap: 4px;
+  min-width: 0;
 }
-.fh-bar { flex: 1; display: flex; align-items: flex-end; width: 100%; }
-.fh-bar i { display: block; width: 100%; border-radius: 3px 3px 0 0; opacity: .9; }
+.fh-bar {
+  position: relative;
+  height: 34px;
+  /* 零轴就是柱子的底边，不再靠 magic number 定位，改行高也不会错位 */
+  border-bottom: 1px dashed var(--border-2);
+}
+/* 有负费率时零轴挪到中间，正柱向上、负柱向下 */
+.fhist.has-neg .fh-bar { border-bottom: none; }
+.fhist.has-neg .fh-bar::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  border-top: 1px dashed var(--border-2);
+  pointer-events: none;
+}
+.fh-bar i {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 16px;
+  min-width: 5px;
+  bottom: 0;
+  height: calc(var(--h) * 100%);
+  border-radius: 3px 3px 0 0;
+  opacity: .9;
+}
+.fhist.has-neg .fh-bar i.up { bottom: 50%; height: calc(var(--h) * 50%); }
+.fhist.has-neg .fh-bar i.down {
+  top: 50%;
+  height: calc(var(--h) * 50%);
+  border-radius: 0 0 3px 3px;
+}
 .fh-bar i.up { background: var(--up); }
 .fh-bar i.down { background: var(--down); }
-.fh-col span { font-size: 8.5px; color: var(--muted); white-space: nowrap; }
+.fh-col span {
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
 
 @container (max-width: 460px) {
   .ch-row2 .ch-fund { display: none; }
