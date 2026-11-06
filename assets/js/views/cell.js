@@ -46,6 +46,7 @@ function indParams() {
     boll: p.boll || 20,
     bollMult: p.bollMult || 2,
     macd: [m[0] || 12, m[1] || 26, m[2] || 9],
+    spike: p.spike > 0 ? p.spike : 3,
   };
 }
 const MACD_H = 72;
@@ -206,6 +207,7 @@ export class Cell {
           <button class="cell-sym"></button>
           <span class="cell-price">--</span>
           <span class="cell-chg">--</span>
+          <span class="cell-vol" hidden></span>
         </div>
         <div class="ch-row2">
           <span>高 <b data-k="h">--</b></span>
@@ -227,6 +229,7 @@ export class Cell {
     this.symBtn = this.el.querySelector('.cell-sym');
     this.priceEl = this.el.querySelector('.cell-price');
     this.chgEl = this.el.querySelector('.cell-chg');
+    this.volBadgeEl = this.el.querySelector('.cell-vol');
     this.hEl = this.el.querySelector('[data-k="h"]');
     this.loEl = this.el.querySelector('[data-k="lo"]');
     this.qvEl = this.el.querySelector('[data-k="qv"]');
@@ -1117,7 +1120,38 @@ export class Cell {
   }
 
   /* ---------------- 渲染 ---------------- */
+  /** 爆量：本根成交额 / 前 20 根均额，返回倍数（数据不足返回 0）
+   *  用成交额而不是成交量：跨币种可比，和「最近成交」那一栏同一口径。
+   *  当前这根还没走完，倍数天然偏低——能触发的一定是真放量，不会误报。 */
+  volRatio() {
+    const n = this.bars.length;
+    if (n < 21) return 0;
+    let sum = 0;
+    for (let i = n - 21; i < n - 1; i++) sum += this.bars[i][6] || 0;
+    const avg = sum / 20;
+    if (!(avg > 0)) return 0;
+    return (this.bars[n - 1][6] || 0) / avg;
+  }
+
+  renderSpike() {
+    const el = this.volBadgeEl;
+    if (!el) return;
+    const r = this.volRatio();
+    const on = r >= indParams().spike;
+    // 窄格子（8×4 以上）里徽标会被表头裁掉，所以整格再给一层底色提示
+    this.el.classList.toggle('spike', on);
+    if (!on) {
+      if (!el.hidden) el.hidden = true;
+      return;
+    }
+    const q = this.bars[this.bars.length - 1][6] || 0;
+    el.hidden = false;
+    el.textContent = '爆量 ×' + (r >= 10 ? String(Math.round(r)) : r.toFixed(1));
+    el.title = `本根成交额 ${fmtCompact(q)}，是前 20 根均值的 ${r.toFixed(1)} 倍`;
+  }
+
   renderHead() {
+    this.renderSpike();
     const r = market.get(this.symbol);
     if (!r) return;
     const dp = dpOf(this.symbol);

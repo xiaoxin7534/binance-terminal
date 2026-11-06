@@ -19,6 +19,7 @@ export const IND_DEFAULTS = Object.freeze({
   boll: 20,
   bollMult: 2,
   macd: [12, 26, 9],
+  spike: 3,          // 爆量阈值：本根成交额 ≥ 前 20 根均额的 N 倍
 });
 
 const DEFAULTS = {

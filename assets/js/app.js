@@ -583,8 +583,9 @@ function bindToolbar() {
       save();
       grid.setIndicators();
       for (const c of grid.cells) {
-        if (!c.mounted || c.intraday || !c.times || !c.times.length) continue;
-        c.renderLegend(c.times.length - 1);
+        if (!c.mounted || !c.times || !c.times.length) continue;
+        c.renderHead();          // 爆量阈值改了就靠这里重判
+        if (!c.intraday) c.renderLegend(c.times.length - 1);
       }
       if (big && big.isOpen() && big.cell && big.cell.times.length) {
         big.cell.recalcIndicators();

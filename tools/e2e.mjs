@@ -1254,6 +1254,89 @@ test('指标参数：改 MA/EMA/BOLL/MACD 后重算并持久化', async (s) => {
   assertEq(back.macd, '12,26,9', '恢复默认后 MACD 参数不对');
 });
 
+test('爆量徽标：阈值生效，倍数与手算一致', async (s) => {
+  await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,300));
+    window.__term.grid.setIntervalAll('1m');
+    for (let i=0;i<100;i++){
+      const c = window.__term.grid.cells[0];
+      if (c && c.bars && c.bars.length > 30) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
+    return 1;
+  `);
+
+  const setThr = async (v) => {
+    await s.ev(`
+      document.querySelector('#ind-params-btn').click();
+      await new Promise(r=>setTimeout(r,160));
+      const pop = document.querySelector('.popover.params');
+      pop.querySelector('[data-f="spike"]').value = ${v};
+      pop.querySelector('[data-act="apply"]').click();
+      await new Promise(r=>setTimeout(r,500));
+      return 1;
+    `);
+  };
+
+  // 1) 阈值拉到 20：无论当前量多大都不该有徽标（门控必须真的按参数走）
+  await setThr(20);
+  const hi = await s.ev(`
+    const cells = window.__term.grid.cells.filter(c => c.mounted && c.bars && c.bars.length > 30);
+    if (!cells.length) return null;
+    const shown = cells.filter(c => !c.volBadgeEl.hidden);
+    return { n: cells.length, shown: shown.length, thr: window.__term.state.indParams.spike };
+  `);
+  assert(hi, '没有已挂载且有 K 线的格子');
+  assertEq(hi.thr, 20, '阈值没写进 state');
+  assertEq(hi.shown, 0, `阈值 20 倍时仍有 ${hi.shown}/${hi.n} 个格子显示爆量`);
+
+  // 2) 阈值降到 1.2，等某格真的超过 1.2 倍（1m 的当前根随时可能滚到下一根，不能一次就断言）
+  await setThr(1.2);
+  let hit = null;
+  for (let i = 0; i < 60; i++) {
+    hit = await s.ev(`
+      const cells = window.__term.grid.cells.filter(c => c.mounted && c.bars && c.bars.length > 30);
+      let best = null, br = -1;
+      for (const c of cells) { const r = c.volRatio(); if (r > br) { br = r; best = c; } }
+      if (!best || br < 1.2) return null;
+      const n = best.bars.length;
+      let sum = 0;
+      for (let k=n-21;k<n-1;k++) sum += best.bars[k][6]||0;
+      const manual = sum > 0 ? (best.bars[n-1][6]||0) / (sum/20) : 0;
+      return { idx: best.index, ratio: br, manual,
+               hidden: best.volBadgeEl.hidden, text: best.volBadgeEl.textContent,
+               title: best.volBadgeEl.title, thr: window.__term.state.indParams.spike };
+    `);
+    if (hit) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  assert(hit, '30 秒内没有任何格子的成交额超过 20 根均值的 1.2 倍');
+  assertEq(hit.thr, 1.2, '阈值没写进 state');
+  assert(!hit.hidden, `倍数 ${hit.ratio.toFixed(2)} 已超过阈值，徽标却没出现`);
+  assert(hit.text.startsWith('爆量 ×'), '徽标文字不对：' + hit.text);
+  const shown = Number(hit.text.replace('爆量 ×', ''));
+  assert(Number.isFinite(shown), '徽标倍数不是数字：' + hit.text);
+  // 徽标保留 1 位小数（≥10 时取整），容差跟着放宽
+  const tol = shown >= 10 ? 0.6 : 0.06;
+  assert(Math.abs(shown - hit.manual) < tol,
+    `徽标倍数 ${shown} 与手算 ${hit.manual.toFixed(3)} 不一致`);
+  assert(hit.title.includes('倍') && hit.title.includes('成交额'), '悬停说明不完整：' + hit.title);
+
+  // 3) 恢复默认
+  await s.ev(`
+    document.querySelector('#ind-params-btn').click();
+    await new Promise(r=>setTimeout(r,160));
+    document.querySelector('.popover.params [data-act="reset"]').click();
+    await new Promise(r=>setTimeout(r,120));
+    document.querySelector('.popover.params [data-act="apply"]').click();
+    await new Promise(r=>setTimeout(r,400));
+    return 1;
+  `);
+  const back = await s.ev('return window.__term.state.indParams.spike;');
+  assertEq(back, 3, '恢复默认后阈值不是 3');
+});
+
 /* ================================================================== 执行 */
 const server = await checkServer();
 const bin = findChrome();

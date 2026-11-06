@@ -176,6 +176,9 @@ export function openParams(anchor, current, defaults, onApply) {
     <div class="pp-row"><label>MACD 快/慢/信号</label><span class="pp-nums">
       ${num('m0', macd[0], 1, 200, 1)}${num('m1', macd[1], 1, 200, 1)}${num('m2', macd[2], 1, 200, 1)}
     </span></div>
+    <div class="pp-row"><label>爆量阈值 ×</label><span class="pp-nums">
+      ${num('spike', current.spike ?? defaults.spike, 1.2, 20, 0.5)}
+    </span></div>
     <div class="pp-foot">
       <button class="chip" data-act="reset">恢复默认</button>
       <button class="chip on" data-act="apply">应用</button>
@@ -204,6 +207,7 @@ export function openParams(anchor, current, defaults, onApply) {
       boll: g('boll', defaults.boll, 2, 500),
       bollMult: g('bollMult', defaults.bollMult, 0.5, 5),
       macd: [g('m0', defaults.macd[0], 1, 200), g('m1', defaults.macd[1], 1, 200), g('m2', defaults.macd[2], 1, 200)],
+      spike: g('spike', defaults.spike, 1.2, 20),
     };
   };
 
@@ -213,7 +217,8 @@ export function openParams(anchor, current, defaults, onApply) {
     if (b.dataset.act === 'reset') {
       const d = { ma0: defaults.ma[0], ma1: defaults.ma[1], ma2: defaults.ma[2],
         ema: defaults.ema, boll: defaults.boll, bollMult: defaults.bollMult,
-        m0: defaults.macd[0], m1: defaults.macd[1], m2: defaults.macd[2] };
+        m0: defaults.macd[0], m1: defaults.macd[1], m2: defaults.macd[2],
+        spike: defaults.spike };
       for (const k in d) {
         const el = pop.querySelector(`[data-f="${k}"]`);
         if (el) el.value = d[k];
