@@ -34,6 +34,7 @@ const DEFAULTS = {
   interval: '1m',
   bcInterval: '1d',     // 大图自己的周期（默认日线，和格子墙的周期分开记）
   sparkWin: '2h',       // 右侧详情面板迷你走势的窗口：2h / 1d / 1w / 1m
+  sparkH: 84,           // 迷你走势的高度（可拖拽调整，默认 84）
   indicators: { ma: true, vol: true, macd: true, boll: false },
   // 指标参数：三条 SMA + 一条 EMA、BOLL 周期/倍数、MACD 快慢信号
   indParams: { ...IND_DEFAULTS, ma: [...IND_DEFAULTS.ma], macd: [...IND_DEFAULTS.macd] },
@@ -144,7 +145,8 @@ export function save() {
         view: state.view, theme: state.theme, font: state.font,
         watchOpen: state.watchOpen,
         layout: state.layout, rows: state.rows,
-        interval: state.interval, bcInterval: state.bcInterval, sparkWin: state.sparkWin,
+        interval: state.interval, bcInterval: state.bcInterval,
+        sparkWin: state.sparkWin, sparkH: state.sparkH,
         indicators: state.indicators,
         indParams: state.indParams,
         sync: state.sync, cells: state.cells, favs: state.favs,

@@ -296,6 +296,7 @@ export class DetailPanel {
         <div class="dt-spark-tabs" data-role="sparktabs">
           ${SPARK_WINS.map((w) => `<button data-win="${w.k}" class="${sparkWin().k === w.k ? 'on' : ''}">${w.label}</button>`).join('')}
         </div>
+        <div class="dt-spark-resize" data-role="sparkresize" title="拖动调整走势图高度（双击复位）"></div>
       </div>
       <div class="dt-section">
         <h4>行情统计<span class="cd" data-role="cd"></span><span class="line"></span></h4>
@@ -359,6 +360,8 @@ export class DetailPanel {
     this.pxEl = this.$('px');
     this.pctEl = this.$('pct');
     this.chartEl = this.$('chart');
+    if (this.chartEl && state.sparkH) this.chartEl.style.height = state.sparkH + 'px';
+    this.bindSparkResize();
     this.bookEl = this.$('book');
     this.tradesEl = this.$('trades');
     this.flowEl = this.$('tflow');
@@ -405,6 +408,51 @@ export class DetailPanel {
 
     this.createChart();
     this.updateStats();
+  }
+
+  /** 迷你走势高度可拖：默认只有 84px，看趋势太扁 */
+  bindSparkResize() {
+    const h = this.$('sparkresize');
+    if (!h || !this.chartEl) return;
+    const apply = (px) => {
+      const v = Math.max(60, Math.min(320, Math.round(px)));
+      this.chartEl.style.height = v + 'px';
+      if (this.chart) this.chart.applyOptions({ height: v });
+      state.sparkH = v;
+      return v;
+    };
+    let startY = 0;
+    let startH = 0;
+    let dragging = false;
+
+    h.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      startY = e.clientY;
+      startH = this.chartEl.getBoundingClientRect().height;
+      try { h.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      h.classList.add('active');
+      document.body.style.cursor = 'row-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    h.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      apply(startH + (e.clientY - startY));
+    });
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      h.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      save();
+    };
+    h.addEventListener('pointerup', end);
+    h.addEventListener('pointercancel', end);
+    h.addEventListener('dblclick', () => {
+      apply(84);
+      save();
+    });
   }
 
   createChart() {

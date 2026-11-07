@@ -2045,6 +2045,89 @@ test('详情面板：迷你走势可切 2时/1天/1周/1月', async (s) => {
   await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,400)); return 1;`);
 });
 
+test('详情面板：迷你走势高度可拖拽调整', async (s) => {
+  await s.ev(`
+    document.querySelector('#tabs button[data-view="list"]').click();
+    await new Promise(r=>setTimeout(r,900));
+    const row = document.querySelector('.tbody-inner .row');
+    if (row) row.click();
+    await new Promise(r=>setTimeout(r,2200));
+    return 1;
+  `);
+
+  const before = await s.ev(`
+    const el = document.querySelector('#detail [data-role="chart"]');
+    const h = document.querySelector('#detail [data-role="sparkresize"]');
+    return { h: Math.round(el.getBoundingClientRect().height),
+             handle: !!h, handleH: h ? Math.round(h.getBoundingClientRect().height) : 0,
+             stateH: window.__term.state.sparkH };
+  `);
+  assert(before.handle, '没有高度拖拽条');
+  assert(before.handleH >= 5, '拖拽条太窄，抓不住：' + before.handleH);
+  assert(Math.abs(before.h - 84) <= 2, '默认高度不是 84：' + before.h);
+
+  // 往下拖 80px
+  const drag = await s.ev(`
+    const h = document.querySelector('#detail [data-role="sparkresize"]');
+    const el = document.querySelector('#detail [data-role="chart"]');
+    const y0 = h.getBoundingClientRect().top + 3;
+    h.dispatchEvent(new PointerEvent('pointerdown', { bubbles:true, clientY:y0, pointerId:1 }));
+    h.dispatchEvent(new PointerEvent('pointermove', { bubbles:true, clientY:y0+80, pointerId:1 }));
+    h.dispatchEvent(new PointerEvent('pointerup',   { bubbles:true, clientY:y0+80, pointerId:1 }));
+    await new Promise(r=>setTimeout(r,450));   // save() 防抖
+    return { h: Math.round(el.getBoundingClientRect().height),
+             stateH: window.__term.state.sparkH,
+             saved: JSON.parse(localStorage.getItem('binance-terminal.v1')||'{}').sparkH,
+             cursor: document.body.style.cursor };
+  `);
+  assert(Math.abs(drag.h - (before.h + 80)) <= 3, `拖 80px 后应约 ${before.h + 80}，实际 ${drag.h}`);
+  assertEq(drag.stateH, drag.h, 'state.sparkH 与实际高度不一致');
+  assertEq(drag.saved, drag.h, '高度没写进 localStorage');
+  assertEq(drag.cursor, '', '拖完鼠标指针没还原');
+
+  // 换一个币，面板重建后高度仍然保持
+  const rebuilt = await s.ev(`
+    const rows = document.querySelectorAll('.tbody-inner .row');
+    if (rows[1]) rows[1].click();
+    await new Promise(r=>setTimeout(r,1600));
+    const el = document.querySelector('#detail [data-role="chart"]');
+    return { h: Math.round(el.getBoundingClientRect().height) };
+  `);
+  assert(Math.abs(rebuilt.h - drag.h) <= 2, `换币后高度丢了：${rebuilt.h}`);
+
+  // 双击复位
+  const reset = await s.ev(`
+    const h = document.querySelector('#detail [data-role="sparkresize"]');
+    h.dispatchEvent(new MouseEvent('dblclick', { bubbles:true }));
+    await new Promise(r=>setTimeout(r,400));
+    const el = document.querySelector('#detail [data-role="chart"]');
+    return { h: Math.round(el.getBoundingClientRect().height), stateH: window.__term.state.sparkH };
+  `);
+  assertEq(reset.stateH, 84, '双击后 state 没回到 84');
+  assert(Math.abs(reset.h - 84) <= 2, '双击复位后高度不对：' + reset.h);
+
+  // 上下限：拖到很小 / 很大都不该越界
+  const clamp = await s.ev(`
+    const h = document.querySelector('#detail [data-role="sparkresize"]');
+    const el = document.querySelector('#detail [data-role="chart"]');
+    const y0 = h.getBoundingClientRect().top + 3;
+    const drag = async (dy) => {
+      h.dispatchEvent(new PointerEvent('pointerdown', { bubbles:true, clientY:y0, pointerId:1 }));
+      h.dispatchEvent(new PointerEvent('pointermove', { bubbles:true, clientY:y0+dy, pointerId:1 }));
+      h.dispatchEvent(new PointerEvent('pointerup',   { bubbles:true, clientY:y0+dy, pointerId:1 }));
+      await new Promise(r=>setTimeout(r,120));
+      return Math.round(el.getBoundingClientRect().height);
+    };
+    const low = await drag(-500);
+    const high = await drag(900);
+    h.dispatchEvent(new MouseEvent('dblclick', { bubbles:true }));
+    await new Promise(r=>setTimeout(r,300));
+    return { low, high };
+  `);
+  assert(clamp.low >= 60, '最小高度越界：' + clamp.low);
+  assert(clamp.high <= 320, '最大高度越界：' + clamp.high);
+});
+
 /* ================================================================== 执行 */
 const server = await checkServer();
 const bin = findChrome();

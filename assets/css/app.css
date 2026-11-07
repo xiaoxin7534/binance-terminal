@@ -1642,6 +1642,28 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
 }
 .dt-spark-tabs button:hover { color: var(--text); background: var(--hover); }
 .dt-spark-tabs button.on { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+
+/* 迷你走势的高度拖拽条：平时只露出一道细握把，hover / 拖动时变蓝 */
+.dt-spark-resize {
+  height: 7px;
+  cursor: row-resize;
+  position: relative;
+  z-index: 4;
+}
+.dt-spark-resize::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 26px;
+  height: 2px;
+  margin-left: -13px;
+  border-radius: 1px;
+  background: var(--border-2);
+  transition: background .12s;
+}
+.dt-spark-resize:hover::after,
+.dt-spark-resize.active::after { background: var(--accent); }
 /* 详情面板 · 费率历史小标题 */
 .fh-head {
   display: flex;
