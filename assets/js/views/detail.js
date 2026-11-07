@@ -1,9 +1,18 @@
 /* 右侧详情：迷你走势 + 24h 数据 + 合约指标 + 盘口 + 逐笔 */
 
 import { api } from '../core/api.js';
-import { market, state, dpOf, isFav, toggleFav, sectorLabels } from '../core/store.js';
+import { market, state, save, dpOf, isFav, toggleFav, sectorLabels } from '../core/store.js';
 import { openMenu } from '../core/picker.js';
 import { cachedKlines } from './cell.js';
+
+/** 迷你走势的可选窗口：都换算成「周期 + 根数」，最后一根永远贴着现在 */
+const SPARK_WINS = [
+  { k: '2h', label: '2时', iv: '1m', n: 120 },
+  { k: '1d', label: '1天', iv: '15m', n: 96 },
+  { k: '1w', label: '1周', iv: '1h', n: 168 },
+  { k: '1m', label: '1月', iv: '4h', n: 180 },
+];
+const sparkWin = () => SPARK_WINS.find((w) => w.k === state.sparkWin) || SPARK_WINS[0];
 import {
   fmtPrice, fmtCompact, fmtPct, fmtQty, fmtFunding, dirClass, clockTime,
 } from '../core/fmt.js';
@@ -284,7 +293,9 @@ export class DetailPanel {
       </div>
       <div class="dt-chart-wrap">
         <div class="dt-chart" data-role="chart"></div>
-        <span class="dt-chart-tag">近 2 小时</span>
+        <div class="dt-spark-tabs" data-role="sparktabs">
+          ${SPARK_WINS.map((w) => `<button data-win="${w.k}" class="${sparkWin().k === w.k ? 'on' : ''}">${w.label}</button>`).join('')}
+        </div>
       </div>
       <div class="dt-section">
         <h4>行情统计<span class="cd" data-role="cd"></span><span class="line"></span></h4>
@@ -353,6 +364,20 @@ export class DetailPanel {
     this.flowEl = this.$('tflow');
     this.buyBarEl = this.$('buybar');
 
+    const tabs = this.root.querySelector('[data-role="sparktabs"]');
+    if (tabs) {
+      tabs.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-win]');
+        if (!b || b.dataset.win === state.sparkWin) return;
+        state.sparkWin = b.dataset.win;
+        save();
+        for (const x of tabs.querySelectorAll('[data-win]')) {
+          x.classList.toggle('on', x.dataset.win === state.sparkWin);
+        }
+        this.loadSpark();
+      });
+    }
+
     this.root.querySelector('[data-role="fav"]').addEventListener('click', (e) => {
       toggleFav(this.symbol);
       const on = isFav(this.symbol);
@@ -397,7 +422,8 @@ export class DetailPanel {
         attributionLogo: false,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: dark ? 'rgba(255,255,255,.05)' : 'rgba(15,23,42,.05)' } },
-      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.16, bottom: 0.1 }, entireTextOnly: true },
+      // top 留 0.3：左上角压着 2时/1天/1周/1月 的切换条，曲线别钻到按钮底下
+      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.3, bottom: 0.1 }, entireTextOnly: true },
       timeScale: { visible: false },
       crosshair: { mode: LC.CrosshairMode.Normal },
       handleScale: false,
@@ -432,23 +458,23 @@ export class DetailPanel {
 
   async loadSpark() {
     const sym = this.symbol;
-    // 格子 / 大图刚拉过这个币的 1m，先拿它铺上——迷你走势图只有 84px 高，
-    // 让用户盯着空白等 2~5 秒的接口毫无意义
-    const warm = cachedKlines(sym, '1m');
-    if (warm && warm.length) {
-      const rows = warm.slice(-120).map((b) => ({ time: Math.floor(b[0] / 1000), value: b[4] }));
-      this.area.setData(rows);
-      this.chart.timeScale().fitContent();
-      this.colorSpark();
-    }
+    const w = sparkWin();
+    // 格子 / 大图刚拉过这个币，先拿缓存铺上——迷你走势图只有 84px 高，
+    // 让用户盯着空白等接口没有意义
+    const warm = cachedKlines(sym, w.iv);
+    if (warm && warm.length) this.paintSpark(warm.slice(-w.n));
     try {
-      const res = await api.klines(sym, '1m', 120);
+      const res = await api.klines(sym, w.iv, w.n);
       if (sym !== this.symbol || !this.area) return;
-      const data = res.k.map((b) => ({ time: Math.floor(b[0] / 1000), value: b[4] }));
-      this.area.setData(data);
-      this.chart.timeScale().fitContent();
-      this.colorSpark();
+      this.paintSpark(res.k);
     } catch (e) { /* ignore */ }
+  }
+
+  paintSpark(bars) {
+    if (!this.area || !bars || !bars.length) return;
+    this.area.setData(bars.map((b) => ({ time: Math.floor(b[0] / 1000), value: b[4] })));
+    try { this.chart.timeScale().fitContent(); } catch (e) { /* ignore */ }
+    this.colorSpark();
   }
 
   colorSpark() {

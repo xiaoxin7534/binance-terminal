@@ -1974,6 +1974,77 @@ test('周期：大图默认日线，周线/月线/30分都能出图', async (s) 
   `);
 });
 
+test('详情面板：迷你走势可切 2时/1天/1周/1月', async (s) => {
+  // 列表视图 + 选中一行，让右侧详情面板出现
+  await s.ev(`
+    document.querySelector('#tabs button[data-view="list"]').click();
+    await new Promise(r=>setTimeout(r,900));
+    const row = document.querySelector('.tbody-inner .row');
+    if (row) row.click();
+    await new Promise(r=>setTimeout(r,2200));
+    return 1;
+  `);
+
+  // 1) 四个窗口按钮都在，默认 2时 高亮
+  const tabs = await s.ev(`
+    const d = document.querySelector('#detail');
+    const btns = [...d.querySelectorAll('.dt-spark-tabs button')];
+    return { labels: btns.map(b=>b.textContent), wins: btns.map(b=>b.dataset.win),
+             on: btns.filter(b=>b.classList.contains('on')).map(b=>b.dataset.win),
+             win: window.__term.state.sparkWin };
+  `);
+  assertEq(tabs.wins.join(','), '2h,1d,1w,1m', '窗口按钮不对：' + tabs.wins.join(','));
+  assertEq(tabs.on.join(','), '2h', '默认高亮的窗口不对：' + tabs.on.join(','));
+  assertEq(tabs.win, '2h', 'state.sparkWin 默认值不对：' + tabs.win);
+
+  // 2) 逐个切过去，确认曲线数据换成了对应周期的根数
+  const pick = async (win, minBars, maxBars) => {
+    const r = await s.ev(`
+      const d = window.__term.detail;
+      document.querySelector('#detail .dt-spark-tabs button[data-win="${win}"]').click();
+      for (let i=0;i<80;i++){
+        const n = d.area ? d.area.data().length : 0;
+        if (n > 20 && n <= ${maxBars}) break;
+        await new Promise(r=>setTimeout(r,120));
+      }
+      await new Promise(r=>setTimeout(r,420));   // save() 有 250ms 防抖
+      await new Promise(r=>setTimeout(r,420));   // save() 有 250ms 防抖
+      const btns = [...document.querySelectorAll('#detail .dt-spark-tabs button')];
+      return { n: d.area ? d.area.data().length : 0,
+               win: window.__term.state.sparkWin,
+               on: btns.filter(b=>b.classList.contains('on')).map(b=>b.dataset.win),
+               saved: JSON.parse(localStorage.getItem('binance-terminal.v1')||'{}').sparkWin };
+    `);
+    assertEq(r.win, win, '切到 ' + win + ' 后 state 不对：' + r.win);
+    assertEq(r.on.join(','), win, '高亮没切过去：' + r.on.join(','));
+    assert(r.n >= minBars && r.n <= maxBars, `${win} 的曲线根数异常：${r.n}（期望 ${minBars}~${maxBars}）`);
+    assertEq(r.saved, win, '窗口没写进 localStorage');
+    return r;
+  };
+
+  await pick('1d', 30, 96);
+  await pick('1w', 60, 168);
+  await pick('1m', 60, 180);
+
+  // 3) 切回 2 时，收尾
+  await pick('2h', 30, 120);
+
+  // 4) 大图右侧面板也用同一套（同一个 DetailPanel 类）
+  const big = await s.ev(`
+    window.__term.big.open('BTCUSDT@f');
+    await new Promise(r=>setTimeout(r,2400));
+    const d = window.__term.big.detailPanel;
+    const btns = [...document.querySelectorAll('#bc-detail .dt-spark-tabs button')];
+    return { n: btns.length, on: btns.filter(b=>b.classList.contains('on')).map(b=>b.dataset.win),
+             bars: d.area ? d.area.data().length : 0 };
+  `);
+  assertEq(big.n, 4, '大图右侧面板没有窗口按钮');
+  assertEq(big.on.join(','), '2h', '大图右侧面板默认窗口不对：' + big.on.join(','));
+  assert(big.bars > 20, '大图右侧面板曲线没数据：' + big.bars);
+
+  await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,400)); return 1;`);
+});
+
 /* ================================================================== 执行 */
 const server = await checkServer();
 const bin = findChrome();

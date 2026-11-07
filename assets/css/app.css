@@ -1618,13 +1618,30 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
 .dt-chart-wrap { position: relative; border-bottom: 1px solid var(--border); }
 .dt-chart-wrap .dt-chart { border-bottom: none; }
 
-/* 详情面板 · 迷你走势标签 */
-.dt-chart-tag {
+/* 详情面板 · 迷你走势窗口切换（2时/1天/1周/1月） */
+.dt-spark-tabs {
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  z-index: 3;
+  display: flex;
+  gap: 1px;
+  padding: 1px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--panel) 82%, transparent);
-  padding: 1px 5px;
-  border-radius: 3px;
   backdrop-filter: blur(2px);
 }
+.dt-spark-tabs button {
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  letter-spacing: .2px;
+  color: var(--muted);
+  transition: background .12s, color .12s;
+}
+.dt-spark-tabs button:hover { color: var(--text); background: var(--hover); }
+.dt-spark-tabs button.on { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 /* 详情面板 · 费率历史小标题 */
 .fh-head {
   display: flex;
