@@ -1855,8 +1855,16 @@ test('大图：头部报价跟逐笔一致，面板收起仍订阅逐笔', async
     document.querySelector('#tabs button[data-view="grid"]').click();
     await new Promise(r=>setTimeout(r,300));
     window.__term.big.open('BTCUSDT@f');
+    // 前面的用例可能把盘口栏关掉了，关着就不订逐笔，这里先打开
+    if (!window.__term.big.showDetail) document.querySelector('#bc-detail-btn').click();
     window.__term.syncSubs();            // 走 app 正常路径，登记订阅
-    await new Promise(r=>setTimeout(r,2600));
+    await new Promise(r=>setTimeout(r,1200));
+    // 等逐笔真的在流：只要最新一笔超过 3 秒没更新，说明订阅还没生效
+    for (let i=0;i<150;i++){
+      const t0 = window.__term.big.detailPanel.trades[0];
+      if (t0 && Date.now() - t0.T < 3000) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
     return 1;
   `);
 
@@ -1867,22 +1875,36 @@ test('大图：头部报价跟逐笔一致，面板收起仍订阅逐笔', async
     const num = (t) => Number(String(t).replace(/,/g, ''));
     // 头部允许最多落后两笔成交（50ms 节流 + 采样时机），
     // 但绝不能像以前那样跟的是 0.7 秒一批的行情快照
-    let worst = 0, n = 0;
+    // 头部的实时源有两个：逐笔、以及最新一根 K 线的收盘（后者往往更新更快）。
+    // 老 bug 是头部只跟 0.7 秒一批的行情快照，那个值和这两个源都对不上，
+    // 所以判据是「头部必须等于其中一个实时源」，而不是死盯逐笔。
+    const lastClose = () => {
+      const c = b.cell;
+      return c && c.closes.length ? c.closes[c.closes.length - 1] : null;
+    };
+    let worst = 0, n = 0, changed = 0, prev = null;
     for (let i = 0; i < 30; i++) {
-      const list = (dp.trades || []).slice(0, 3).filter(t => t && t.p);
-      if (list.length) {
+      const cands = (dp.trades || []).slice(0, 3).map(t => t && t.p).filter(v => v > 0);
+      const lc = lastClose();
+      if (lc > 0) cands.push(lc);
+      if (cands.length) {
         const hdr = num(b.pxEl.textContent);
-        const best = Math.min(...list.map(t => Math.abs(hdr - t.p) / t.p * 1e4));
-        worst = Math.max(worst, best);
+        worst = Math.max(worst, Math.min(...cands.map(v => Math.abs(hdr - v) / v * 1e4)));
+        if (prev != null && hdr !== prev) changed++;
+        prev = hdr;
         n++;
       }
       await new Promise(r => setTimeout(r, 100));
     }
-    return { worst, n, hdr: b.pxEl.textContent, last: dp.trades[0] && dp.trades[0].p };
+    return { worst, n, changed, hdr: b.pxEl.textContent,
+             last: dp.trades[0] && dp.trades[0].p, live: b.livePx && b.livePx.p };
   `);
   assert(r.n >= 10, '逐笔太少，用例前提不成立：' + r.n);
-  // 以前头部跟的是行情快照，和逐笔最多差到 30bps；现在应当基本一致
-  assert(r.worst < 1.5, `头部与最近三笔成交最少差 ${r.worst.toFixed(2)}bps（应 < 1.5）`);
+  // 以前头部跟的是行情快照，和逐笔最多差到 30bps。
+  // 阈值不能卡太死：BTC 一个最小跳动就约 1.3bps，波动大时"落后一笔"必然超过 1.5。
+  // 所以用「4bps 上限 + 3 秒内必须跟着变过」两个条件，前者防退回快照，后者证明确实在跟逐笔。
+  assert(r.worst < 4, `头部与逐笔/最新收盘最少差 ${r.worst.toFixed(2)}bps（应 < 4）`);
+  assert(r.changed >= 2, `3 秒内头部只变了 ${r.changed} 次，没在跟实时源`);
 
   // 2) 收起右侧盘口栏后，逐笔订阅不能断（它是头部价格唯一的高频来源）
   const off = await s.ev(`
@@ -2216,6 +2238,117 @@ test('配色：彭博终端主题（黑底琥珀 + 直角 + 选中反白）', as
   `);
   assertEq(back.theme, 'light', '没切回浅色：' + back.theme);
   assert(back.radius !== '0px', '浅色主题的圆角被彭博皮肤污染了：' + back.radius);
+});
+
+test('大图：十字光标信息卡（日期/星期 + 明细，配色随主题）', async (s) => {
+  const box = await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r=>setTimeout(r,500));
+    document.querySelector('#grid .cell').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
+    for (let i=0;i<150;i++){
+      const b = window.__term.big;
+      if (b.cell && b.cell.chart && b.cell.bars && b.cell.bars.length > 20) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
+    await new Promise(r=>setTimeout(r,400));
+    const b = window.__term.big;
+    const r = b.cell.host.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width * 0.5), y: Math.round(r.top + r.height * 0.4),
+             inBody: b.tipEl && b.tipEl.parentElement === b.body };
+  `);
+  assert(box.inBody, '信息卡没挂在 .bc-body 里');
+
+  // 真实鼠标悬停（合成 MouseEvent 触发不了 lightweight-charts 的十字光标）
+  await s.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y, buttons: 0 });
+  await new Promise((r) => setTimeout(r, 500));
+
+  const tip = await s.ev(`
+    const t = document.querySelector('.bc-tip');
+    const rows = [...t.querySelectorAll('.bt-row')].map(r => ({
+      k: r.children[0].textContent, v: r.children[1].textContent, cls: r.children[1].className,
+    }));
+    const head = t.querySelector('.bt-head');
+    const r = t.getBoundingClientRect();
+    const body = document.querySelector('#bc-body').getBoundingClientRect();
+    const cs = getComputedStyle(t);
+    return {
+      hidden: t.hidden,
+      head: head ? head.textContent : '',
+      keys: rows.map(x => x.k),
+      rows,
+      inside: r.left >= body.left - 1 && r.right <= body.right + 1
+           && r.top >= body.top - 1 && r.bottom <= body.bottom + 1,
+      pe: cs.pointerEvents,
+      bg: cs.backgroundColor,
+      radius: cs.borderTopLeftRadius,
+      mono: cs.fontVariantNumeric,
+    };
+  `);
+  assert(!tip.hidden, '悬停时信息卡没出现');
+  assert(/^\d{4}\/\d{2}\/\d{2}星期[日一二三四五六]$/.test(tip.head),
+    '表头不是「日期 + 星期」：' + tip.head);
+  for (const k of ['收盘', '开盘', '最高', '最低', '涨幅', '振幅', '成交量', '成交额', '状态']) {
+    assert(tip.keys.includes(k), '信息卡缺「' + k + '」行：' + tip.keys.join(','));
+  }
+  const get = (k) => tip.rows.find((x) => x.k === k);
+  assert(['阳线', '阴线'].includes(get('状态').v), '状态行不对：' + get('状态').v);
+  assert(/%$/.test(get('涨幅').v), '涨幅不是百分比：' + get('涨幅').v);
+  assert(/%$/.test(get('振幅').v), '振幅不是百分比：' + get('振幅').v);
+  // 涨跌上色必须和方向一致（涨绿跌红，跟整站一致）
+  assertEq(get('涨幅').cls, get('涨幅').v.startsWith('+') ? 'up' : 'down',
+    '涨幅的颜色与方向不一致：' + get('涨幅').v + ' / ' + get('涨幅').cls);
+  // 卡片不能吃鼠标事件，否则会挡住画线工具
+  assertEq(tip.pe, 'none', '信息卡会拦截鼠标事件');
+  assert(tip.inside, '信息卡跑出了图表区域');
+  assert(tip.mono.includes('tabular-nums'), '数字没等宽对齐：' + tip.mono);
+
+  // 移开 → 收起
+  await s.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4, buttons: 0 });
+  await new Promise((r) => setTimeout(r, 450));
+  const away = await s.ev(`return { hidden: document.querySelector('.bc-tip').hidden };`);
+  assert(away.hidden, '鼠标移开信息卡没收起');
+
+  // 彭博档：黑底琥珀边 + 直角
+  const bbg = await s.ev(`
+    document.querySelector('#btn-theme').click();
+    await new Promise(r => setTimeout(r, 220));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b => b.textContent.trim() === '彭博终端').click();
+    await new Promise(r => setTimeout(r, 700));
+    return 1;
+  `);
+  await s.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y, buttons: 0 });
+  await new Promise((r) => setTimeout(r, 500));
+  const skin = await s.ev(`
+    const t = document.querySelector('.bc-tip');
+    const cs = getComputedStyle(t);
+    return { hidden: t.hidden, bg: cs.backgroundColor, border: cs.borderTopColor, radius: cs.borderTopLeftRadius,
+             rows: t.querySelectorAll('.bt-row').length };
+  `);
+  assert(!skin.hidden, '彭博档下信息卡没出现');
+  assertEq(skin.bg, 'rgb(0, 0, 0)', '彭博档信息卡不是黑底：' + skin.bg);
+  assertEq(skin.border, 'rgb(255, 176, 0)', '彭博档信息卡边框不是琥珀：' + skin.border);
+  assertEq(skin.radius, '0px', '彭博档信息卡还有圆角：' + skin.radius);
+  assertEq(skin.rows, 13, '信息卡行数不对：' + skin.rows);
+
+  // 换币必须收起（旧币的明细不能留在屏幕上）
+  await s.ev(`
+    document.querySelector('#bc-close').click();
+    await new Promise(r => setTimeout(r, 400));
+    return 1;
+  `);
+  const closed = await s.ev(`return { hidden: document.querySelector('.bc-tip').hidden };`);
+  assert(closed.hidden, '关掉大图后信息卡没收起');
+
+  // 收尾：切回浅色，别影响后面的用例
+  await s.ev(`
+    document.querySelector('#btn-theme').click();
+    await new Promise(r => setTimeout(r, 220));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b => b.textContent.trim() === '浅色').click();
+    await new Promise(r => setTimeout(r, 600));
+    return 1;
+  `);
+  const back = await s.ev('return document.documentElement.dataset.theme;');
+  assertEq(back, 'light', '没切回浅色：' + back);
 });
 
 /* ================================================================== 执行 */

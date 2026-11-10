@@ -10,7 +10,7 @@
 import { api } from '../core/api.js';
 import { state, market, dpOf, save } from '../core/store.js';
 import { openPrompt } from '../core/picker.js';
-import { fmtPrice, fmtPct, fmtCompact, dirClass, symLabel } from '../core/fmt.js';
+import { fmtPrice, fmtPct, fmtCompact, fmtSigned, dirClass, symLabel } from '../core/fmt.js';
 import { Cell } from './cell.js';
 import { DetailPanel } from './detail.js';
 
@@ -733,6 +733,12 @@ export class BigChart {
     this.quoteTimer = 0;
 
     this.body = root.querySelector('.bc-body');
+    // 十字光标信息卡：贴着光标显示这一根 K 线的明细。
+    // 必须等 this.body 拿到再 append —— 构造函数前半段还没有它。
+    this.tipEl = document.createElement('div');
+    this.tipEl.className = 'bc-tip';
+    this.tipEl.hidden = true;
+    this.body.appendChild(this.tipEl);
     // 复位按钮挂在图表格子里，不能挂在 .bc-body —— 那里面还含右侧盘口栏，
     // right:72px 会算到盘口栏上面去
     this.resetBtn = root.querySelector('#bc-reset');
@@ -1142,7 +1148,10 @@ export class BigChart {
     if (!sym) return;
     const same = this.isOpen() && this.symbol === sym && this.interval === (iv || this.interval);
     const wasOpen = this.isOpen();
-    if (this.symbol !== sym) this.livePx = null;
+    if (this.symbol !== sym) {
+      this.livePx = null;
+      this.hideTip();
+    }
     this.symbol = sym;
     if (iv && IVS.includes(iv)) this.interval = iv;
 
@@ -1163,6 +1172,7 @@ export class BigChart {
 
   close() {
     if (!this.isOpen()) return;
+    this.hideTip();
     this.root.classList.add('hidden');
     document.body.classList.remove('bc-open');
     clearTimeout(this.oiPrefetchTimer);
@@ -1195,6 +1205,7 @@ export class BigChart {
   }
 
   mountCell() {
+    this.hideTip();
     this.destroyCell();
     const stub = {
       detached: true,
@@ -1258,11 +1269,13 @@ export class BigChart {
       if (!param || param.time == null) {
         this.hoverIdx = -1;
         this.showInfo(this.cell.times.length - 1);
+        this.hideTip();
         return;
       }
       const idx = this.cell.timeIdx(param.time);
       this.hoverIdx = idx;
       this.showInfo(idx);
+      this.showTip(idx, param.point);
     });
 
     cell.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
@@ -1312,6 +1325,87 @@ export class BigChart {
     this.pxEl.className = 'bc-px ' + cls;
     this.chgEl.textContent = fmtPct(chgp);
     this.chgEl.className = 'bc-chg ' + cls;
+  }
+
+  /** 十字光标信息卡：像终端那样把这一根 K 线的明细列成表 */
+  showTip(idx, point) {
+    const el = this.tipEl;
+    const c = this.cell;
+    if (!el || !c || !c.times.length) return;
+    // 正在画线时不弹卡片：它会挡住落点，也干扰对第二根 K 线位置的判断
+    if (this.draw && this.draw.tool) { this.hideTip(); return; }
+    // 正在画线时不弹卡片：它会挡住落点，也干扰对第二根 K 线位置的判断
+    if (this.draw && this.draw.tool) { this.hideTip(); return; }
+
+    const i = Math.max(0, Math.min(c.times.length - 1, idx));
+    const d = new Date(c.times[i] * 1000);
+    const dp = dpOf(this.symbol);
+    const day = `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
+    const wd = '星期' + '日一二三四五六'[d.getDay()];
+    const head = `<div class="bt-head"><span>${day}</span><span>${wd}</span></div>`;
+
+    let rows = '';
+    const row = (k, v, cls) => {
+      rows += `<div class="bt-row"><span>${k}</span><b class="${cls || ''}">${v}</b></div>`;
+    };
+
+    if (c.intraday) {
+      const px = c.closes[i];
+      const base = c.basePrice || c.closes[0] || 0;
+      const pct = base ? (px / base - 1) * 100 : 0;
+      row('价格', fmtPrice(px, dp), dirClass(pct));
+      row('今开', fmtPrice(base, dp));
+      row('较今开', fmtPct(pct), dirClass(pct));
+      row('成交量', fmtCompact(c.vols[i] || 0));
+    } else {
+      const b = c.bars[i];
+      if (!b) { this.hideTip(); return; }
+      const o = b[1];
+      const h = b[2];
+      const lo = b[3];
+      const cl = b[4];
+      const v = b[5];
+      const q = b[6] || 0;
+      const pct = o ? (cl / o - 1) * 100 : 0;
+      const amp = o ? ((h - lo) / o) * 100 : 0;
+      const prev = i > 0 ? c.bars[i - 1][4] : null;
+      const pct2 = prev ? (cl / prev - 1) * 100 : null;
+      const cls = dirClass(pct);
+      row('收盘', fmtPrice(cl, dp), cls);
+      row('开盘', fmtPrice(o, dp));
+      row('最高', fmtPrice(h, dp));
+      row('最低', fmtPrice(lo, dp));
+      if (prev != null) row('前收', fmtPrice(prev, dp));
+      row('涨跌', fmtSigned(cl - o, dp), cls);
+      row('涨幅', fmtPct(pct), cls);
+      if (pct2 != null) row('较前收', fmtPct(pct2), dirClass(pct2));
+      row('振幅', amp.toFixed(2) + '%');
+      row('成交量', fmtCompact(v));
+      row('成交额', fmtCompact(q));
+      if (v > 0 && q > 0) row('均价', fmtPrice(q / v, dp));
+      row('状态', cl >= o ? '阳线' : '阴线', cl >= o ? 'up' : 'down');
+    }
+
+    el.innerHTML = head + rows;
+    el.hidden = false;
+
+    // 位置：贴着光标右侧；右边放不下就翻到左边，上下夹在图表里
+    const bodyRect = this.body.getBoundingClientRect();
+    const hostRect = c.host.getBoundingClientRect();
+    const px = hostRect.left - bodyRect.left + (point ? point.x : 0);
+    const py = hostRect.top - bodyRect.top + (point ? point.y : 0);
+    const w = el.offsetWidth || 160;
+    const hh = el.offsetHeight || 200;
+    let left = px + 16;
+    if (left + w > this.body.clientWidth - 8) left = px - 16 - w;
+    left = Math.max(6, Math.min(left, this.body.clientWidth - w - 6));
+    const top = Math.max(6, Math.min(py - 12, this.body.clientHeight - hh - 6));
+    el.style.left = Math.round(left) + 'px';
+    el.style.top = Math.round(top) + 'px';
+  }
+
+  hideTip() {
+    if (this.tipEl && !this.tipEl.hidden) this.tipEl.hidden = true;
   }
 
   /** 十字光标 / 最新一根的 OHLC 明细 */

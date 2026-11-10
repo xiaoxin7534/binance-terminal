@@ -2868,3 +2868,69 @@ html[data-theme="bbg"] .cell-price.up,
 html[data-theme="bbg"] .bc-px.up { color: var(--up); }
 html[data-theme="bbg"] .cell-price.down,
 html[data-theme="bbg"] .bc-px.down { color: var(--down); }
+
+/* ==========================================================================
+   大图 · 十字光标信息卡
+   --------------------------------------------------------------------------
+   照终端的样子把一根 K 线的明细列成「标签 — 数值」两列，数值右对齐、等宽、
+   涨跌上色。配色全部走主题变量，所以彭博档自动变成黑底琥珀边。
+   卡片不能吃鼠标事件，否则画线工具和拖拽会被它挡住。
+   ========================================================================== */
+.bc-tip {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  min-width: 158px;
+  padding: 5px 8px 6px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 93%, transparent);
+  backdrop-filter: blur(3px);
+  box-shadow: var(--shadow-2);
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.bc-tip[hidden] { display: none; }
+
+.bc-tip .bt-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 3px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.bc-tip .bt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.bc-tip .bt-row > span { color: var(--muted); }
+.bc-tip .bt-row > b {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.bc-tip .bt-row > b.up { color: var(--up); }
+.bc-tip .bt-row > b.down { color: var(--down); }
+.bc-tip .bt-row > b.flat { color: var(--text-2); }
+
+/* 彭博档：黑底 + 琥珀边框，和终端里那种"选中框"一致；直角由全局规则接管 */
+html[data-theme="bbg"] .bc-tip {
+  background: #000;
+  border-color: #ffb000;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+html[data-theme="bbg"] .bc-tip .bt-head {
+  border-bottom-color: #262626;
+  color: #ffb000;
+}
+html[data-theme="bbg"] .bc-tip .bt-row > span { color: var(--muted); }
