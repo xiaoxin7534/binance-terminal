@@ -534,12 +534,17 @@ test('大图：持仓量叠加（独立副图）', async (s) => {
     if (big.isOpen()) big.close();
     await new Promise(r=>setTimeout(r,300));
     big.open('BTCUSDT@f','1m');
-    await new Promise(r=>setTimeout(r,3800));
+    // 等图表真的建好：跑全量时前面用例多，固定 3.8 秒会不够
+    for (let i = 0; i < 250; i++) {
+      if (big.cell && big.cell.chart && big.cell.bars && big.cell.bars.length > 10) break;
+      await new Promise(r=>setTimeout(r,100));
+    }
+    await new Promise(r=>setTimeout(r,600));
     const before = big.cell.chart.panes().length;
     document.querySelector('#bc-oi-btn').click();
     // 持仓量历史要走代理，单次 2~5 秒（行情抖动时更久），
     // 固定等 4 秒会偶发误报，这里改成轮询到数据到位为止
-    for (let i = 0; i < 300; i++) {
+    for (let i = 0; i < 600; i++) {
       if (big.oiData && big.oiData.length > 10) break;
       await new Promise(r=>setTimeout(r,50));
     }
@@ -2130,51 +2135,87 @@ test('详情面板：迷你走势高度可拖拽调整', async (s) => {
 });
 
 
-test('配色：彭博终端主题（黑底琥珀字 + 等宽）', async (s) => {
+test('配色：彭博终端主题（黑底琥珀 + 直角 + 选中反白）', async (s) => {
+  // 1) 配色入口必须是有名字的菜单，不是盲点循环
+  const menu = await s.ev(`
+    document.querySelector('#btn-theme').click();
+    await new Promise(r => setTimeout(r, 200));
+    const pop = document.querySelector('.popover.menu');
+    if (!pop) return null;
+    return { items: [...pop.querySelectorAll('.menu-item')].map(b => b.textContent.trim()),
+             on: [...pop.querySelectorAll('.menu-item.on')].map(b => b.textContent.trim()) };
+  `);
+  assert(menu, '点配色按钮没弹出菜单');
+  assertEq(menu.items.join(','), '浅色,深色,彭博终端', '配色菜单项不对：' + menu.items.join(','));
+
+  // 2) 选「彭博终端」
   const r = await s.ev(`
-    for (let i = 0; i < 4 && document.documentElement.dataset.theme !== 'bbg'; i++) {
-      document.querySelector('#btn-theme').click();
-      await new Promise(r => setTimeout(r, 260));
-    }
-    await new Promise(r => setTimeout(r, 300));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b => b.textContent.trim() === '彭博终端').click();
+    await new Promise(r => setTimeout(r, 700));
     const cs = getComputedStyle(document.body);
     const root = getComputedStyle(document.documentElement);
+    const topbar = document.querySelector('.topbar');
+    const segBtn = document.querySelector('#interval-seg button.on') || document.querySelector('#interval-seg button');
+    const chip = document.querySelector('.chip');
+    const seg = document.querySelector('#interval-seg');
     return {
       theme: document.documentElement.dataset.theme,
       bg: cs.backgroundColor,
       fg: cs.color,
       font: cs.fontFamily,
       textVar: root.getPropertyValue('--text').trim(),
-      accent: root.getPropertyValue('--accent').trim(),
       title: document.querySelector('#btn-theme').title,
+      topbarBorder: getComputedStyle(topbar).borderBottomColor,
+      topbarBg: getComputedStyle(topbar).backgroundColor,
+      // 直角：终端里没有圆角
+      segRadius: segBtn ? getComputedStyle(segBtn).borderRadius : null,
+      chipRadius: chip ? getComputedStyle(chip).borderRadius : null,
+      // 选中项反白成琥珀块
+      segOnBg: getComputedStyle(seg.querySelector('button.on')).backgroundColor,
+      segOnColor: getComputedStyle(seg.querySelector('button.on')).color,
+      segBorder: getComputedStyle(seg).borderTopColor,
+      tabular: cs.fontVariantNumeric,
     };
   `);
   assertEq(r.theme, 'bbg', '没切到彭博主题：' + r.theme);
   assertEq(r.bg, 'rgb(0, 0, 0)', '底色不是纯黑：' + r.bg);
   assertEq(r.textVar, '#ffb000', '主文字不是琥珀色：' + r.textVar);
   assert(/mono|consolas|cascadia|courier/i.test(r.font), '字体不是等宽：' + r.font);
-  assert(r.title.includes('彭博'), '主题按钮提示没跟着变：' + r.title);
+  assert(r.title.includes('彭博'), '配色按钮提示没跟着变：' + r.title);
 
-  // 图表也吃这个主题：K 线画布存在且没报错
+  // 3) 皮肤必须真的压平，不只是换色
+  assertEq(r.topbarBg, 'rgb(0, 0, 0)', '顶栏不是纯黑：' + r.topbarBg);
+  assertEq(r.topbarBorder, 'rgb(255, 176, 0)', '顶栏下边线不是琥珀色：' + r.topbarBorder);
+  assertEq(r.segRadius, '0px', '分段按钮还有圆角（皮肤没压平）：' + r.segRadius);
+  assertEq(r.chipRadius, '0px', '顶栏按钮还有圆角：' + r.chipRadius);
+  assertEq(r.segOnBg, 'rgb(255, 176, 0)', '选中的周期不是琥珀反白：' + r.segOnBg);
+  assertEq(r.segOnColor, 'rgb(0, 0, 0)', '琥珀块上的字不是黑色：' + r.segOnColor);
+  assertEq(r.segBorder, 'rgb(38, 38, 38)', '分段控件边框不是硬边：' + r.segBorder);
+  assert(r.tabular.includes('tabular-nums'), '数字没用等宽对齐：' + r.tabular);
+
+  // 4) 图表也吃这个主题
   const chart = await s.ev(`
     document.querySelector('#tabs button[data-view="grid"]').click();
     await new Promise(r => setTimeout(r, 700));
-    return { canvas: !!document.querySelector('#grid .cell canvas'), err: window.__term.state.theme };
+    return { canvas: !!document.querySelector('#grid .cell canvas'), theme: window.__term.state.theme };
   `);
   assert(chart.canvas, '彭博主题下图表画布没画出来');
-  assertEq(chart.err, 'bbg', 'state.theme 不是 bbg');
+  assertEq(chart.theme, 'bbg', 'state.theme 不是 bbg');
 
-  // 切回浅色，别影响后面的用例
+  // 5) 切回浅色（同样走菜单），别影响后面的用例
   await s.ev(`
-    for (let i = 0; i < 4 && document.documentElement.dataset.theme !== 'light'; i++) {
-      document.querySelector('#btn-theme').click();
-      await new Promise(r => setTimeout(r, 240));
-    }
-    await new Promise(r => setTimeout(r, 300));
+    document.querySelector('#btn-theme').click();
+    await new Promise(r => setTimeout(r, 200));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b => b.textContent.trim() === '浅色').click();
+    await new Promise(r => setTimeout(r, 600));
     return 1;
   `);
-  const back = await s.ev('return document.documentElement.dataset.theme;');
-  assertEq(back, 'light', '没切回浅色：' + back);
+  const back = await s.ev(`
+    return { theme: document.documentElement.dataset.theme,
+             radius: getComputedStyle(document.querySelector('.chip')).borderRadius };
+  `);
+  assertEq(back.theme, 'light', '没切回浅色：' + back.theme);
+  assert(back.radius !== '0px', '浅色主题的圆角被彭博皮肤污染了：' + back.radius);
 });
 
 /* ================================================================== 执行 */

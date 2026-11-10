@@ -144,22 +144,25 @@ if (typeof window !== 'undefined') {
 const cv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 function themeColors() {
-  const dark = document.documentElement.dataset.theme !== 'light';
+  const theme = document.documentElement.dataset.theme;
+  const dark = theme !== 'light';
+  const bbg = theme === 'bbg';
   return {
     panel: cv('--panel'),
     text: cv('--text-2'),
     muted: cv('--muted'),
-    grid: dark ? 'rgba(255,255,255,.05)' : 'rgba(15,23,42,.055)',
+    // 彭博档：网格和十字线都带一点琥珀，和黑底上的琥珀字连成一套
+    grid: bbg ? 'rgba(255,176,0,.07)' : (dark ? 'rgba(255,255,255,.05)' : 'rgba(15,23,42,.055)'),
     up: cv('--up'),
     down: cv('--down'),
-    cross: dark ? 'rgba(255,255,255,.2)' : 'rgba(15,23,42,.22)',
-    label: dark ? '#2b3442' : '#4a5563',
+    cross: bbg ? 'rgba(255,176,0,.35)' : (dark ? 'rgba(255,255,255,.2)' : 'rgba(15,23,42,.22)'),
+    label: bbg ? '#ffb000' : (dark ? '#2b3442' : '#4a5563'),
     // 涨跌色统一走 CSS 变量，切配色方案时只改变量
     upVol: cv('--up-vol'),
     downVol: cv('--down-vol'),
     upSoft: cv('--up-fill'),
     downSoft: cv('--down-fill'),
-    maBg: dark ? 'rgba(17,21,28,.86)' : 'rgba(255,255,255,.86)',
+    maBg: bbg ? 'rgba(0,0,0,.92)' : (dark ? 'rgba(17,21,28,.86)' : 'rgba(255,255,255,.86)'),
   };
 }
 

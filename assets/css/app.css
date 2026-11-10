@@ -100,11 +100,12 @@ html[data-theme="bbg"] { --font: var(--font-mono); }
   --panel: #050505;
   --panel-2: #0b0b0b;
   --panel-3: #141414;
-  --border: #1e1e1e;
-  --border-2: #333333;
+  --border: #262626;
+  --border-2: #3a3a3a;
   --text: #ffb000;
   --text-2: #d99a12;
-  --muted: #8f6606;
+  /* 原来 #8f6606 在纯黑上只有 3.9:1，10px 小字发暗；抬到 4.9:1 */
+  --muted: #a87a08;
   --up: #00e07a;
   --up-soft: rgba(0, 224, 122, .12);
   --up-fill: rgba(0, 224, 122, .16);
@@ -119,8 +120,9 @@ html[data-theme="bbg"] { --font: var(--font-mono); }
   --bid: #00e07a;
   --ok: #00e07a;
   --danger: #ff4136;
-  --accent: #3d8bfd;
-  --accent-soft: rgba(61, 139, 253, .16);
+  /* 终端只有一个强调色：琥珀。蓝色留给"可点链接"会显得像普通深色主题 */
+  --accent: #ffb000;
+  --accent-soft: rgba(255, 176, 0, .16);
   --spike: #ff7a00;
   --hover: #1c1500;
   --shadow-1: 0 1px 2px rgba(0, 0, 0, .6);
@@ -2729,3 +2731,140 @@ button,
   #watch .w-clear { opacity: .7; pointer-events: auto; }
   .tape-item:hover { background: none; }
 }
+
+/* ==========================================================================
+   彭博终端皮肤（整段放在文件最后，用 html[data-theme="bbg"] 提权覆盖组件样式）
+   --------------------------------------------------------------------------
+   只换 CSS 变量是不够的：圆角、柔和阴影、蓝色胶囊高亮这些"现代 UI"特征都还在，
+   看起来只是"又一个深色主题"，不像终端。这一段把它们全部压平：
+     直角 · 1px 硬边 · 琥珀色高亮（选中反白为琥珀底黑字）· 等宽数字 · 更密的行高
+   注意：必须放在最后，且带 html 前缀（0,1,1），才压得住单类选择器（0,1,0）。
+   ========================================================================== */
+html[data-theme="bbg"] {
+  --r: 0px;
+  --row-h: 26px;
+  --thead-h: 30px;
+  --hover: #1c1500;
+}
+
+/* 终端里没有圆角；等宽数字让价格竖着对齐 */
+html[data-theme="bbg"] *,
+html[data-theme="bbg"] *::before,
+html[data-theme="bbg"] *::after { border-radius: 0 !important; }
+html[data-theme="bbg"] body {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .2px;
+}
+
+/* 滚动条：黑底 + 暗琥珀滑块 */
+html[data-theme="bbg"] ::-webkit-scrollbar { width: 9px; height: 9px; }
+html[data-theme="bbg"] ::-webkit-scrollbar-track { background: #000; }
+html[data-theme="bbg"] ::-webkit-scrollbar-thumb { background: #3a2c00; border: 1px solid #000; }
+html[data-theme="bbg"] ::-webkit-scrollbar-thumb:hover { background: #6b5200; }
+html[data-theme="bbg"] { scrollbar-color: #3a2c00 #000; }
+
+/* 选中文字：琥珀底黑字 */
+html[data-theme="bbg"] ::selection { background: #ffb000; color: #000; }
+
+/* 顶栏：纯黑 + 琥珀下边线（原来那层柔和投影在这儿不像终端） */
+html[data-theme="bbg"] .topbar {
+  background: #000;
+  border-bottom: 1px solid #ffb000;
+  box-shadow: none;
+}
+html[data-theme="bbg"] .brand { color: #ffb000; letter-spacing: .8px; }
+html[data-theme="bbg"] .brand em { color: #8f6606; }
+
+/* 视图 tab：选中用琥珀下划线，不用浅色胶囊 */
+html[data-theme="bbg"] .tabs button { color: #8f6606; background: transparent; }
+html[data-theme="bbg"] .tabs button:hover { color: #ffb000; background: #1c1500; }
+html[data-theme="bbg"] .tabs button.on {
+  color: #ffb000;
+  background: #1c1500;
+  box-shadow: inset 0 -2px 0 #ffb000;
+}
+
+/* 顶栏按钮：默认描边，悬停反白 */
+html[data-theme="bbg"] .icon-btn { color: #d99a12; }
+html[data-theme="bbg"] .icon-btn:hover { background: #ffb000; color: #000; }
+html[data-theme="bbg"] .chip {
+  background: #0b0b0b;
+  border: 1px solid #333;
+  color: #d99a12;
+}
+html[data-theme="bbg"] .chip:hover { border-color: #ffb000; color: #ffb000; background: #141414; }
+html[data-theme="bbg"] .chip.on { background: #ffb000; border-color: #ffb000; color: #000; font-weight: 700; }
+
+/* 分段控件（周期 / 指标 / 布局）：选中项反白成琥珀块，这是终端最标志性的一眼 */
+html[data-theme="bbg"] .seg { background: #0b0b0b; border: 1px solid #262626; }
+html[data-theme="bbg"] .seg button { color: #8f6606; }
+html[data-theme="bbg"] .seg button:hover { color: #ffb000; background: #1c1500; }
+html[data-theme="bbg"] .seg button.on,
+html[data-theme="bbg"] .seg.blue button.on {
+  background: #ffb000;
+  color: #000;
+  font-weight: 700;
+}
+
+/* 表头：小号大写琥珀字 + 硬下边线 */
+html[data-theme="bbg"] .thead {
+  background: #000;
+  color: #8f6606;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  border-bottom: 1px solid #262626;
+}
+
+/* 列表行：hover 琥珀底，选中左侧亮条 */
+html[data-theme="bbg"] .row:hover { background: #1c1500; }
+html[data-theme="bbg"] .row.sel { background: #2a1f00; }
+html[data-theme="bbg"] .row.sel::before { background: #ffb000; }
+
+/* 格子：硬边 + 选中琥珀框 */
+html[data-theme="bbg"] .cell { border-color: #1e1e1e; background: #000; }
+html[data-theme="bbg"] .cell.on { border-color: #ffb000; }
+html[data-theme="bbg"] .cell-head { background: #050505; border-bottom: 1px solid #1e1e1e; }
+
+/* 弹层 / 菜单 / 提示：黑底琥珀边框，去掉阴影 */
+html[data-theme="bbg"] .popover { background: #050505; border: 1px solid #ffb000; }
+html[data-theme="bbg"] .pp-head { color: #ffb000; border-bottom: 1px solid #262626; }
+html[data-theme="bbg"] .menu-item:hover { background: #ffb000; color: #000; }
+html[data-theme="bbg"] .menu-item:hover .n { color: #000; opacity: .7; }
+html[data-theme="bbg"] .menu-item.on { background: #2a1f00; color: #ffb000; }
+html[data-theme="bbg"] .toast { background: #050505; border: 1px solid #ffb000; }
+html[data-theme="bbg"] .toast-act { color: #ffb000; }
+
+/* 输入框 */
+html[data-theme="bbg"] input,
+html[data-theme="bbg"] select,
+html[data-theme="bbg"] textarea {
+  background: #000;
+  color: #ffb000;
+  border: 1px solid #333;
+}
+html[data-theme="bbg"] input:focus,
+html[data-theme="bbg"] select:focus,
+html[data-theme="bbg"] textarea:focus { border-color: #ffb000; outline: none; }
+html[data-theme="bbg"] input::placeholder { color: #6b5200; }
+
+/* 详情面板：区块标题改成琥珀小标签 + 细线 */
+html[data-theme="bbg"] .dt-section { border-bottom: 1px solid #1e1e1e; }
+html[data-theme="bbg"] .dt-section h4 { color: #ffb000; letter-spacing: .4px; }
+html[data-theme="bbg"] .w-group { color: #ffb000; }
+
+/* 迷你走势窗口切换 */
+html[data-theme="bbg"] .dt-spark-tabs { background: #000; border: 1px solid #262626; }
+html[data-theme="bbg"] .dt-spark-tabs button { color: #8f6606; }
+html[data-theme="bbg"] .dt-spark-tabs button.on { background: #ffb000; color: #000; }
+
+/* 大图工具栏 */
+html[data-theme="bbg"] .bc-bar { border-bottom: 1px solid #262626; }
+html[data-theme="bbg"] .bc-draw-grp { background: #0b0b0b; border: 1px solid #262626; }
+html[data-theme="bbg"] .bc-draw button.on { background: #ffb000; color: #000; }
+html[data-theme="bbg"] .bc-resize::after { background: #262626; }
+
+/* 涨跌仍用绿/红（终端里也是这套），但把"柔化"的底色收紧成细线 */
+html[data-theme="bbg"] .cell-price.up,
+html[data-theme="bbg"] .bc-px.up { color: var(--up); }
+html[data-theme="bbg"] .cell-price.down,
+html[data-theme="bbg"] .bc-px.down { color: var(--down); }

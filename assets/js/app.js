@@ -680,8 +680,10 @@ function bindToolbar() {
     });
   });
 
+  // 配色：点开菜单直接选名字（原来只能盲点循环，三档里第三档没人会发现）
   $('#btn-theme').addEventListener('click', () => {
-    applyTheme(nextTheme(state.theme));
+    const items = THEMES.map((k) => ({ key: k, label: THEME_NAMES[k] }));
+    openMenu($('#btn-theme'), items, state.theme, (k) => applyTheme(k));
   });
 
   $('#btn-scanner').addEventListener('click', () => {
