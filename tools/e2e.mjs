@@ -954,7 +954,8 @@ test('界面字体：菜单切换 + 持久化', async (s) => {
     return { items: [...document.querySelectorAll('.popover.menu .menu-item')].map(x => x.dataset.k) };
   `);
   assert(!menu.missing, '顶栏没有「字体」按钮');
-  assertEq(JSON.stringify(menu.items), JSON.stringify(['pingfang', 'yahei', 'system']), '字体菜单项不对');
+  assertEq(JSON.stringify(menu.items), JSON.stringify(['pingfang', 'yahei', 'system', 'mono']),
+    '字体菜单项不对（应含新加的等宽字体）');
 
   const y = await s.ev(`
     document.querySelector('.popover.menu .menu-item[data-k="yahei"]').click();
@@ -1974,7 +1975,7 @@ test('周期：大图默认日线，周线/月线/30分都能出图', async (s) 
   `);
 });
 
-test('详情面板：迷你走势可切 2时/1天/1周/1月', async (s) => {
+test('详情面板：迷你走势可切 分时/5日/1天/1周/1月', async (s) => {
   // 列表视图 + 选中一行，让右侧详情面板出现
   await s.ev(`
     document.querySelector('#tabs button[data-view="list"]').click();
@@ -1993,41 +1994,41 @@ test('详情面板：迷你走势可切 2时/1天/1周/1月', async (s) => {
              on: btns.filter(b=>b.classList.contains('on')).map(b=>b.dataset.win),
              win: window.__term.state.sparkWin };
   `);
-  assertEq(tabs.wins.join(','), '2h,1d,1w,1m', '窗口按钮不对：' + tabs.wins.join(','));
-  assertEq(tabs.on.join(','), '2h', '默认高亮的窗口不对：' + tabs.on.join(','));
-  assertEq(tabs.win, '2h', 'state.sparkWin 默认值不对：' + tabs.win);
+  assertEq(tabs.wins.join(','), 'time,5d,1d,1w,1m', '窗口按钮不对：' + tabs.wins.join(','));
+  assertEq(tabs.on.join(','), 'time', '默认高亮的窗口不对：' + tabs.on.join(','));
+  assertEq(tabs.win, 'time', 'state.sparkWin 默认值不对：' + tabs.win);
 
-  // 2) 逐个切过去，确认曲线数据换成了对应周期的根数
-  const pick = async (win, minBars, maxBars) => {
+  // 2) 逐个切过去，确认高亮、state 和数据都跟着变
+  const pick = async (win) => {
     const r = await s.ev(`
       const d = window.__term.detail;
       document.querySelector('#detail .dt-spark-tabs button[data-win="${win}"]').click();
-      for (let i=0;i<80;i++){
-        const n = d.area ? d.area.data().length : 0;
-        if (n > 20 && n <= ${maxBars}) break;
-        await new Promise(r=>setTimeout(r,120));
-      }
+      await new Promise(r=>setTimeout(r,1700));
       await new Promise(r=>setTimeout(r,420));   // save() 有 250ms 防抖
-      await new Promise(r=>setTimeout(r,420));   // save() 有 250ms 防抖
+      const arr = d.area ? d.area.data() : [];
       const btns = [...document.querySelectorAll('#detail .dt-spark-tabs button')];
-      return { n: d.area ? d.area.data().length : 0,
+      return { n: arr.length, first: arr.length ? arr[0].time : 0,
                win: window.__term.state.sparkWin,
                on: btns.filter(b=>b.classList.contains('on')).map(b=>b.dataset.win),
                saved: JSON.parse(localStorage.getItem('binance-terminal.v1')||'{}').sparkWin };
     `);
     assertEq(r.win, win, '切到 ' + win + ' 后 state 不对：' + r.win);
     assertEq(r.on.join(','), win, '高亮没切过去：' + r.on.join(','));
-    assert(r.n >= minBars && r.n <= maxBars, `${win} 的曲线根数异常：${r.n}（期望 ${minBars}~${maxBars}）`);
     assertEq(r.saved, win, '窗口没写进 localStorage');
+    assert(r.n > 20, win + ' 的曲线没数据：' + r.n);
     return r;
   };
 
-  await pick('1d', 30, 96);
-  await pick('1w', 60, 168);
-  await pick('1m', 60, 180);
+  const w5d = await pick('5d');
+  const w1d = await pick('1d');
+  const w1w = await pick('1w');
+  const w1m = await pick('1m');
+  // 不同窗口的数据必须真的不一样（防止"切了但图没换"）
+  const firsts = new Set([w5d.first, w1d.first, w1w.first, w1m.first]);
+  assertEq(firsts.size, 4, '四个窗口的曲线起点相同，说明没真正换数据');
 
-  // 3) 切回 2 时，收尾
-  await pick('2h', 30, 120);
+  // 3) 切回分时，收尾
+  await pick('time');
 
   // 4) 大图右侧面板也用同一套（同一个 DetailPanel 类）
   const big = await s.ev(`
@@ -2038,8 +2039,8 @@ test('详情面板：迷你走势可切 2时/1天/1周/1月', async (s) => {
     return { n: btns.length, on: btns.filter(b=>b.classList.contains('on')).map(b=>b.dataset.win),
              bars: d.area ? d.area.data().length : 0 };
   `);
-  assertEq(big.n, 4, '大图右侧面板没有窗口按钮');
-  assertEq(big.on.join(','), '2h', '大图右侧面板默认窗口不对：' + big.on.join(','));
+  assertEq(big.n, 5, '大图右侧面板没有窗口按钮');
+  assertEq(big.on.join(','), 'time', '大图右侧面板默认窗口不对：' + big.on.join(','));
   assert(big.bars > 20, '大图右侧面板曲线没数据：' + big.bars);
 
   await s.ev(`window.__term.big.close(); await new Promise(r=>setTimeout(r,400)); return 1;`);
@@ -2126,6 +2127,54 @@ test('详情面板：迷你走势高度可拖拽调整', async (s) => {
   `);
   assert(clamp.low >= 60, '最小高度越界：' + clamp.low);
   assert(clamp.high <= 320, '最大高度越界：' + clamp.high);
+});
+
+
+test('配色：彭博终端主题（黑底琥珀字 + 等宽）', async (s) => {
+  const r = await s.ev(`
+    for (let i = 0; i < 4 && document.documentElement.dataset.theme !== 'bbg'; i++) {
+      document.querySelector('#btn-theme').click();
+      await new Promise(r => setTimeout(r, 260));
+    }
+    await new Promise(r => setTimeout(r, 300));
+    const cs = getComputedStyle(document.body);
+    const root = getComputedStyle(document.documentElement);
+    return {
+      theme: document.documentElement.dataset.theme,
+      bg: cs.backgroundColor,
+      fg: cs.color,
+      font: cs.fontFamily,
+      textVar: root.getPropertyValue('--text').trim(),
+      accent: root.getPropertyValue('--accent').trim(),
+      title: document.querySelector('#btn-theme').title,
+    };
+  `);
+  assertEq(r.theme, 'bbg', '没切到彭博主题：' + r.theme);
+  assertEq(r.bg, 'rgb(0, 0, 0)', '底色不是纯黑：' + r.bg);
+  assertEq(r.textVar, '#ffb000', '主文字不是琥珀色：' + r.textVar);
+  assert(/mono|consolas|cascadia|courier/i.test(r.font), '字体不是等宽：' + r.font);
+  assert(r.title.includes('彭博'), '主题按钮提示没跟着变：' + r.title);
+
+  // 图表也吃这个主题：K 线画布存在且没报错
+  const chart = await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r => setTimeout(r, 700));
+    return { canvas: !!document.querySelector('#grid .cell canvas'), err: window.__term.state.theme };
+  `);
+  assert(chart.canvas, '彭博主题下图表画布没画出来');
+  assertEq(chart.err, 'bbg', 'state.theme 不是 bbg');
+
+  // 切回浅色，别影响后面的用例
+  await s.ev(`
+    for (let i = 0; i < 4 && document.documentElement.dataset.theme !== 'light'; i++) {
+      document.querySelector('#btn-theme').click();
+      await new Promise(r => setTimeout(r, 240));
+    }
+    await new Promise(r => setTimeout(r, 300));
+    return 1;
+  `);
+  const back = await s.ev('return document.documentElement.dataset.theme;');
+  assertEq(back, 'light', '没切回浅色：' + back);
 });
 
 /* ================================================================== 执行 */

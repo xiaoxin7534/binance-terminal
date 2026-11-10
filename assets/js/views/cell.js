@@ -144,7 +144,7 @@ if (typeof window !== 'undefined') {
 const cv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 function themeColors() {
-  const dark = document.documentElement.dataset.theme === 'dark';
+  const dark = document.documentElement.dataset.theme !== 'light';
   return {
     panel: cv('--panel'),
     text: cv('--text-2'),

@@ -57,6 +57,12 @@ let alerts = null;
 let stream = null;
 
 /* ------------------------------------------------------------------ 主题 */
+const THEMES = ['light', 'dark', 'bbg'];
+const THEME_NAMES = { light: '浅色', dark: '深色', bbg: '彭博终端' };
+function nextTheme(t) {
+  const i = THEMES.indexOf(t);
+  return THEMES[(i + 1) % THEMES.length];
+}
 function applyTheme(theme, persist = true) {
   document.documentElement.dataset.theme = theme;
   state.theme = theme;
@@ -65,6 +71,8 @@ function applyTheme(theme, persist = true) {
   if (detail) detail.applyTheme();
   if (gridDetail) gridDetail.applyTheme();
   if (big) big.applyTheme();
+  const tb = document.querySelector('#btn-theme');
+  if (tb) tb.title = `切换配色（当前：${THEME_NAMES[theme] || theme}，T）`;
 }
 
 /* --------------------------------------------------------------- 界面字体 */
@@ -72,6 +80,7 @@ const FONT_LABELS = {
   pingfang: '苹方 PingFang',
   yahei: '微软雅黑',
   system: '系统默认（Segoe UI）',
+  mono: '等宽（终端风）',
 };
 /* 字体是否真的装在这台机器上 —— 用画布量文字宽度对比 fallback，
    比 document.fonts.check 可靠：后者对「系统里没声明过的字体」经常误报 true */
@@ -672,7 +681,7 @@ function bindToolbar() {
   });
 
   $('#btn-theme').addEventListener('click', () => {
-    applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+    applyTheme(nextTheme(state.theme));
   });
 
   $('#btn-scanner').addEventListener('click', () => {
@@ -688,6 +697,10 @@ function bindToolbar() {
         key: k,
         label: FONT_LABELS[k] + (fontAvailable(k) ? '' : '（未安装）'),
       }));
+      // 界面整体缩放交给浏览器原生缩放（Ctrl + / Ctrl -）：
+      // 自己用 CSS zoom 缩放会破坏图表坐标——实测 1.2 倍时十字光标偏 128px、画线位置也跟着错
+      items.push({ divider: true });
+      items.push({ header: '整页缩放：Ctrl + / Ctrl -' });
       openMenu(fontBtn, items, state.font, (k) => applyFont(k, true));
     });
   }
@@ -1025,7 +1038,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#help').classList.contains('hidden')) { toggleHelp(false); return; }
   // 大图模式下先交给它自己处理，其余全局快捷键一律让路
   if (big && big.isOpen()) {
-    if (e.key === 't' || e.key === 'T') { applyTheme(state.theme === 'dark' ? 'light' : 'dark'); return; }
+    if (e.key === 't' || e.key === 'T') { applyTheme(nextTheme(state.theme)); return; }
     if (big.onKey(e)) return;
     return;
   }
@@ -1048,7 +1061,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'd' || e.key === 'D') {
     if (state.view === 'grid' && !e.metaKey && !e.ctrlKey) setGridDetail(!state.detailOpen);
   }
-  else if (e.key === 't' || e.key === 'T') applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+  else if (e.key === 't' || e.key === 'T') applyTheme(nextTheme(state.theme));
   else if (e.key === '/') {
     e.preventDefault();
     switchView('list');

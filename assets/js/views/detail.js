@@ -7,7 +7,8 @@ import { cachedKlines } from './cell.js';
 
 /** 迷你走势的可选窗口：都换算成「周期 + 根数」，最后一根永远贴着现在 */
 const SPARK_WINS = [
-  { k: '2h', label: '2时', iv: '1m', n: 120 },
+  { k: 'time', label: '分时', kind: 'intra', days: 1 },     // 今日 00:00 起，和格子里的分时同源
+  { k: '5d', label: '5日', kind: 'intra', days: 5 },        // 近五日连续分时
   { k: '1d', label: '1天', iv: '15m', n: 96 },
   { k: '1w', label: '1周', iv: '1h', n: 168 },
   { k: '1m', label: '1月', iv: '4h', n: 180 },
@@ -456,7 +457,7 @@ export class DetailPanel {
   }
 
   createChart() {
-    const dark = document.documentElement.dataset.theme === 'dark';
+    const dark = document.documentElement.dataset.theme !== 'light';
     const W = Math.max(120, this.chartEl.clientWidth || 300);
     const H = Math.max(60, this.chartEl.clientHeight || 92);
     this.chart = LC.createChart(this.chartEl, {
@@ -507,8 +508,18 @@ export class DetailPanel {
   async loadSpark() {
     const sym = this.symbol;
     const w = sparkWin();
-    // 格子 / 大图刚拉过这个币，先拿缓存铺上——迷你走势图只有 84px 高，
-    // 让用户盯着空白等接口没有意义
+
+    if (w.kind === 'intra') {
+      // 分时：今日 00:00 起 / 近五日连续，和格子里「分时 / 5日」同一个接口
+      try {
+        const res = await api.intraday(sym, w.days);
+        if (sym !== this.symbol || !this.area) return;
+        this.paintPoints((res.k || []).map((r) => ({ time: Math.floor(r[0] / 1000), value: r[1] })));
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    // 格子 / 大图刚拉过这个币，先拿缓存铺上——让用户盯着空白等接口没有意义
     const warm = cachedKlines(sym, w.iv);
     if (warm && warm.length) this.paintSpark(warm.slice(-w.n));
     try {
@@ -519,8 +530,17 @@ export class DetailPanel {
   }
 
   paintSpark(bars) {
-    if (!this.area || !bars || !bars.length) return;
-    this.area.setData(bars.map((b) => ({ time: Math.floor(b[0] / 1000), value: b[4] })));
+    if (!bars || !bars.length) return;
+    this.paintPoints(bars.map((b) => ({ time: Math.floor(b[0] / 1000), value: b[4] })));
+  }
+
+  /** 画点。5 日分时是 7000+ 个点，抽稀到 600 个足够这块 84~320px 高的图看趋势 */
+  paintPoints(points) {
+    if (!this.area || !points || !points.length) return;
+    const step = Math.max(1, Math.ceil(points.length / 600));
+    const pts = step === 1 ? points
+      : points.filter((_, i) => i % step === 0 || i === points.length - 1);
+    this.area.setData(pts);
     try { this.chart.timeScale().fitContent(); } catch (e) { /* ignore */ }
     this.colorSpark();
   }
@@ -930,7 +950,7 @@ export class DetailPanel {
 
   applyTheme() {
     if (!this.chart) return;
-    const dark = document.documentElement.dataset.theme === 'dark';
+    const dark = document.documentElement.dataset.theme !== 'light';
     this.chart.applyOptions({
       layout: {
         background: { type: 'solid', color: cv('--panel') },

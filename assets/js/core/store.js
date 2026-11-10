@@ -33,7 +33,7 @@ const DEFAULTS = {
   rows: 0,             // 0=跟随布局行数，N=固定 N 行，-1=铺满当前筛选的全部品种
   interval: '1m',
   bcInterval: '1d',     // 大图自己的周期（默认日线，和格子墙的周期分开记）
-  sparkWin: '2h',       // 右侧详情面板迷你走势的窗口：2h / 1d / 1w / 1m
+  sparkWin: 'time',     // 迷你走势的窗口：time(分时) / 5d / 1d / 1w / 1m
   sparkH: 84,           // 迷你走势的高度（可拖拽调整，默认 84）
   indicators: { ma: true, vol: true, macd: true, boll: false },
   // 指标参数：三条 SMA + 一条 EMA、BOLL 周期/倍数、MACD 快慢信号
@@ -127,6 +127,8 @@ function load() {
       cells: Array.isArray(saved.cells) && saved.cells.length ? saved.cells : [...DEFAULTS.cells],
       favGroups: normalizeGroups(saved),
     };
+    // 老版本只有「近 2 小时」，这档已经取消了，迁到分时
+    if (out.sparkWin === '2h') out.sparkWin = 'time';
     return withActiveFavs(out);
   } catch (e) {
     return withActiveFavs({ ...DEFAULTS, cells: [...DEFAULTS.cells],

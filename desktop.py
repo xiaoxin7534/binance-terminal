@@ -88,6 +88,25 @@ def alive(url):
         return False
 
 
+def work_area():
+    """可用工作区（扣掉任务栏）。拿不到就退回整屏尺寸。
+
+    open_window 用它把窗口铺满屏幕——原来按 92%/90% 缩一圈，
+    1920 的屏幕上左右各空 76px，看起来就是"没占满"。
+    """
+    try:
+        u = ctypes.windll.user32
+        u.SetProcessDPIAware()
+        r = ctypes.wintypes.RECT()
+        if u.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0):   # SPI_GETWORKAREA
+            w, h = r.right - r.left, r.bottom - r.top
+            if w > 400 and h > 300:
+                return w, h
+    except Exception:       # noqa: BLE001
+        pass
+    return screen_size()
+
+
 def screen_size():
     try:
         u = ctypes.windll.user32
@@ -119,9 +138,9 @@ def find_browser():
 
 def open_window(url):
     """用 Chrome/Edge 的 --app 模式开一个无地址栏窗口，返回进程对象"""
-    w, h = screen_size()
-    ww, wh = int(w * 0.92), int(h * 0.90)
-    left, top = max(0, (w - ww) // 2), max(0, (h - wh) // 2)
+    # 默认铺满可用工作区（用户要求"打开就占满窗口"）
+    ww, wh = work_area()
+    left, top = 0, 0
     exe = find_browser()
     if not exe:
         print("没找到 Chrome / Edge，改用系统默认浏览器")

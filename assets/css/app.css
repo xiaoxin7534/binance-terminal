@@ -9,6 +9,8 @@
                    "Segoe UI", system-ui, sans-serif;
   --font-yahei: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
                 "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", "SF Mono", "Menlo", "Liberation Mono",
+               "Courier New", monospace;
   --font-system: -apple-system, "Segoe UI Variable Display", "Segoe UI",
                  "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   --font: var(--font-pingfang);
@@ -56,6 +58,9 @@
 /* 字体切换：属性挂在 <html> 上，比 :root 多一个属性选择器，优先级够覆盖 */
 html[data-font="yahei"] { --font: var(--font-yahei); }
 html[data-font="system"] { --font: var(--font-system); }
+html[data-font="mono"] { --font: var(--font-mono); }
+/* 彭博主题强制等宽：终端的味道全在等宽字上，这里放在 data-font 之后覆盖 */
+html[data-theme="bbg"] { --font: var(--font-mono); }
 
 [data-theme="dark"] {
   --bg: #0a0d12;
@@ -89,9 +94,48 @@ html[data-font="system"] { --font: var(--font-system); }
   --shadow-2: 0 18px 44px rgba(0, 0, 0, .58), 0 3px 10px rgba(0, 0, 0, .35);
 }
 
+/* 彭博终端风：纯黑底 + 琥珀色文字 + 等宽字，选中/链接用蓝，涨绿跌红 */
+[data-theme="bbg"] {
+  --bg: #000000;
+  --panel: #050505;
+  --panel-2: #0b0b0b;
+  --panel-3: #141414;
+  --border: #1e1e1e;
+  --border-2: #333333;
+  --text: #ffb000;
+  --text-2: #d99a12;
+  --muted: #8f6606;
+  --up: #00e07a;
+  --up-soft: rgba(0, 224, 122, .12);
+  --up-fill: rgba(0, 224, 122, .16);
+  --up-fade: rgba(0, 224, 122, 0);
+  --up-vol: rgba(0, 224, 122, .45);
+  --down: #ff4136;
+  --down-soft: rgba(255, 65, 54, .12);
+  --down-fill: rgba(255, 65, 54, .16);
+  --down-fade: rgba(255, 65, 54, 0);
+  --down-vol: rgba(255, 65, 54, .45);
+  --ask: #ff4136;
+  --bid: #00e07a;
+  --ok: #00e07a;
+  --danger: #ff4136;
+  --accent: #3d8bfd;
+  --accent-soft: rgba(61, 139, 253, .16);
+  --spike: #ff7a00;
+  --hover: #1c1500;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .6);
+  --shadow-2: 0 18px 44px rgba(0, 0, 0, .8), 0 3px 10px rgba(0, 0, 0, .5);
+}
+[data-theme="bbg"] body { letter-spacing: .2px; }
+
 * { box-sizing: border-box; }
 
 html, body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;      /* 别让浏览器假粗体，边缘会糊 */
+  text-size-adjust: 100%;
   height: 100%;
   margin: 0;
   overflow: hidden;
@@ -499,12 +543,12 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 .ch-row2 b {
   font-family: var(--mono);
   font-weight: 500;
-  font-size: 9.5px;
+  font-size: 10px;
   color: var(--text-2);
 }
 .ch-iv {
   margin-left: auto;
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: .4px;
   color: var(--muted);
 }
@@ -530,7 +574,7 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 /* 爆量徽标：只在触发时出现，平时不占位 */
 .cell-vol {
   flex: 0 0 auto;
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 650;
   padding: 1px 4px;
   border-radius: 4px;
@@ -734,7 +778,7 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   font-weight: 600;
 }
 .sector-chip .n {
-  font-size: 9.5px;
+  font-size: 10px;
   opacity: .55;
   font-family: var(--mono);
 }
@@ -847,7 +891,7 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 .sym-cell .nm b { font-weight: 600; font-size: 12px; letter-spacing: .1px; }
 .sym-cell .nm i {
   font-style: normal;
-  font-size: 9.5px;
+  font-size: 10px;
   color: var(--muted);
   letter-spacing: .3px;
   /* 股票类合约这一行显示公司名，长名字要截断，不能顶到价格列上 */
@@ -919,7 +963,7 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
 .dt-sub { display: flex; gap: 12px; font-size: 10.5px; color: var(--muted); margin-top: 5px; }
 .dt-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
 .dt-tags span {
-  font-size: 9.5px;
+  font-size: 10px;
   padding: 1px 6px;
   border-radius: 3px;
   background: var(--panel-3);
@@ -933,7 +977,7 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   position: absolute;
   left: 8px; top: 5px;
   z-index: 3;
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: .3px;
   color: var(--muted);
   pointer-events: none;
@@ -1609,7 +1653,7 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
 
 /* hidden 属性必须真的隐藏（否则会被 .ch-row2 span{display:flex} 覆盖） */
 [hidden] { display: none !important; }
-.w-sym u { font-weight: 600; font-size: 9.5px; }
+.w-sym u { font-weight: 600; font-size: 10px; }
 
 /* 小格子里少显示两条均线，避免图例被切 */
 @container (max-width: 430px) { .cell-legend .lg-ema200 { display: none; } }
@@ -1635,7 +1679,7 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
   height: 16px;
   padding: 0 5px;
   border-radius: 3px;
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: .2px;
   color: var(--muted);
   transition: background .12s, color .12s;
@@ -1670,7 +1714,7 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
   justify-content: space-between;
   align-items: baseline;
   margin-top: 12px;
-  font-size: 9.5px;
+  font-size: 10px;
   color: var(--muted);
   letter-spacing: .3px;
 }
@@ -1713,7 +1757,7 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
 /* 盘口档位切换（8 档 / 20 档） */
 .book-more {
   flex: 0 0 auto;
-  font-size: 9.5px;
+  font-size: 10px;
   line-height: 1;
   letter-spacing: .2px;
   text-transform: none;
@@ -1758,7 +1802,7 @@ button.loading { animation: loadPulse 1s ease-in-out infinite; }
 .bc-quote { font-size: 11px; color: var(--muted); }
 .bc-tag {
   margin-left: 6px;
-  font-size: 9.5px;
+  font-size: 10px;
   line-height: 1.5;
   padding: 0 5px;
   border-radius: 3px;
@@ -1956,7 +2000,7 @@ kbd {
 .sector-chip .sec-chg {
   margin-left: 4px;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: 10px;
   opacity: .92;
 }
 .sector-chip .sec-chg.up { color: var(--up); }
@@ -2044,7 +2088,7 @@ kbd {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 9.5px;
+  font-size: 10px;
   color: var(--muted);
   letter-spacing: .3px;
   margin-bottom: 3px;
@@ -2261,7 +2305,7 @@ kbd {
   align-items: center;
   gap: 6px;
   margin-top: 8px;
-  font-size: 9.5px;
+  font-size: 10px;
   font-family: var(--mono);
 }
 .book-ratio-bar {
@@ -2291,7 +2335,7 @@ kbd {
   height: 17px;
 }
 .book-col .book-row .bp { font-size: 10.5px; }
-.book-col .book-row .bq { font-size: 9.5px; }
+.book-col .book-row .bq { font-size: 10px; }
 /* 左列价格靠左、数量靠右；右列同理，视觉上像两块对称的表 */
 .book-col:last-child .book-row .bp { text-align: right; }
 .book-col:last-child .book-row .bq { text-align: right; }
@@ -2339,7 +2383,8 @@ kbd {
   border-bottom-color: transparent;
   box-shadow: 0 1px 0 var(--border), 0 2px 10px rgba(16, 24, 40, .035);
 }
-[data-theme="dark"] .topbar {
+[data-theme="dark"] .topbar,
+[data-theme="bbg"] .topbar {
   box-shadow: 0 1px 0 var(--border), 0 2px 12px rgba(0, 0, 0, .3);
 }
 
@@ -2383,7 +2428,7 @@ button,
 
 /* 详情面板分区标题更克制 */
 .dt-section h4 {
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: .9px;
 }
 
@@ -2544,7 +2589,7 @@ button,
   padding: 1px 6px;
   border-radius: 3px;
   font: inherit;
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: .3px;
   color: var(--muted);
   background: none;
@@ -2636,7 +2681,7 @@ button,
 .cell-sym .cs-q {
   color: var(--muted);
   font-weight: 500;
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: .1px;
 }
 @container (max-width: 330px) {
