@@ -57,8 +57,8 @@ let alerts = null;
 let stream = null;
 
 /* ------------------------------------------------------------------ 主题 */
-const THEMES = ['light', 'dark', 'bbg'];
-const THEME_NAMES = { light: '浅色', dark: '深色', bbg: '彭博终端' };
+const THEMES = ['light', 'dark', 'bbg', 'mac'];
+const THEME_NAMES = { light: '浅色', dark: '深色', bbg: '彭博终端', mac: 'macOS' };
 function nextTheme(t) {
   const i = THEMES.indexOf(t);
   return THEMES[(i + 1) % THEMES.length];

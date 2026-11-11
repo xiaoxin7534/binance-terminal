@@ -15,6 +15,17 @@
 打包进 exe 时一并带上，未做删改。Apache 2.0 要求随分发提供许可证副本，
 因此 `licenses/Apache-2.0.txt` 一并保留在仓库中。
 
+## Inter（数字字体）
+
+- 版本：5.x latin 子集（`assets/fonts/inter-400/500/600.woff2`）
+- 版权：Copyright (c) 2016 The Inter Project Authors
+- 许可：**SIL Open Font License 1.1**
+- 许可证全文：`licenses/Inter-OFL.txt`
+- 项目主页：https://github.com/rsms/inter
+
+只取了 latin 子集的 400/500/600 三个字重（约 72KB），用于价格、涨跌幅等数字显示。
+选它是因为 macOS 的 SF Pro 不能随项目分发，而 Inter 是字形最接近的开源替代。
+
 ## 说明
 
 - 行情数据来自币安公开接口（`api.binance.com` / `fapi.binance.com` / `wss://stream.binance.com`），

@@ -2168,7 +2168,7 @@ test('配色：彭博终端主题（黑底琥珀 + 直角 + 选中反白）', as
              on: [...pop.querySelectorAll('.menu-item.on')].map(b => b.textContent.trim()) };
   `);
   assert(menu, '点配色按钮没弹出菜单');
-  assertEq(menu.items.join(','), '浅色,深色,彭博终端', '配色菜单项不对：' + menu.items.join(','));
+  assertEq(menu.items.join(','), '浅色,深色,彭博终端,macOS', '配色菜单项不对：' + menu.items.join(','));
 
   // 2) 选「彭博终端」
   const r = await s.ev(`
@@ -2223,6 +2223,42 @@ test('配色：彭博终端主题（黑底琥珀 + 直角 + 选中反白）', as
   `);
   assert(chart.canvas, '彭博主题下图表画布没画出来');
   assertEq(chart.theme, 'bbg', 'state.theme 不是 bbg');
+
+  // 4.5) macOS 档：浅色系 + 圆角卡片 + 白色滑块，且图表不能被当成深色
+  const mac = await s.ev(`
+    document.querySelector('#btn-theme').click();
+    await new Promise(r => setTimeout(r, 220));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b => b.textContent.trim() === 'macOS').click();
+    await new Promise(r => setTimeout(r, 900));
+    const root = getComputedStyle(document.documentElement);
+    const body = getComputedStyle(document.body);
+    const cell = document.querySelector('#grid .cell');
+    const cellCs = cell ? getComputedStyle(cell) : null;
+    const tabOn = document.querySelector('#tabs button.on');
+    const segOn = document.querySelector('#interval-seg button.on');
+    return {
+      theme: document.documentElement.dataset.theme,
+      accent: root.getPropertyValue('--accent').trim(),
+      up: root.getPropertyValue('--up').trim(),
+      gradient: body.backgroundImage.includes('radial-gradient'),
+      topbarBg: getComputedStyle(document.querySelector('.topbar')).backgroundColor,
+      cellRadius: cellCs ? cellCs.borderRadius : null,
+      tabOnBg: tabOn ? getComputedStyle(tabOn).backgroundColor : null,
+      segOnBg: segOn ? getComputedStyle(segOn).backgroundColor : null,
+      gridGap: getComputedStyle(document.querySelector('#grid')).gap,
+      canvas: !!document.querySelector('#grid .cell canvas'),
+    };
+  `);
+  assertEq(mac.theme, 'mac', '没切到 macOS：' + mac.theme);
+  assertEq(mac.accent, '#0a84ff', 'macOS 强调色不是系统蓝：' + mac.accent);
+  assertEq(mac.up, '#34c759', 'macOS 涨色不是系统绿：' + mac.up);
+  assert(mac.gradient, 'macOS 档没有壁纸底色（body 缺 radial-gradient）');
+  assertEq(mac.topbarBg, 'rgba(255, 255, 255, 0.72)', 'macOS 顶栏不是半透明白：' + mac.topbarBg);
+  assertEq(mac.cellRadius, '10px', 'macOS 格子不是圆角卡片：' + mac.cellRadius);
+  assertEq(mac.tabOnBg, 'rgb(255, 255, 255)', '视图切换不是白色滑块：' + mac.tabOnBg);
+  assertEq(mac.segOnBg, 'rgb(255, 255, 255)', '周期分段不是白色滑块：' + mac.segOnBg);
+  assertEq(mac.gridGap, '8px', 'macOS 格子之间没有卡片间距：' + mac.gridGap);
+  assert(mac.canvas, 'macOS 档下图表画布没出来');
 
   // 5) 切回浅色（同样走菜单），别影响后面的用例
   await s.ev(`
@@ -2349,6 +2385,98 @@ test('大图：十字光标信息卡（日期/星期 + 明细，配色随主题�
   `);
   const back = await s.ev('return document.documentElement.dataset.theme;');
   assertEq(back, 'light', '没切回浅色：' + back);
+});
+
+test('列表工具栏：缩放后 9 个分类标签全部可见（折两行）', async (s) => {
+  const check = async (w) => {
+    await s.send('Emulation.setDeviceMetricsOverride', { width: w, height: 900, deviceScaleFactor: 1, mobile: false });
+    await new Promise((r) => setTimeout(r, 900));
+    return s.ev(`
+      document.querySelector('#tabs button[data-view="list"]').click();
+      await new Promise(r => setTimeout(r, 900));
+      const tb = document.querySelector('.list-toolbar');
+      const seg = document.querySelector('#list-tab');
+      const btns = [...seg.querySelectorAll('button')];
+      const last = btns[btns.length - 1];
+      const tbR = tb.getBoundingClientRect();
+      const segR = seg.getBoundingClientRect();
+      const lastR = last.getBoundingClientRect();
+      // 每个按钮都必须落在可视区域内，且宽度没被压扁（文字被裁时宽度会变小）
+      const clipped = btns.filter((b) => {
+        const r = b.getBoundingClientRect();
+        return r.right > tbR.right + 1 || r.width < b.scrollWidth - 1;
+      }).map((b) => b.textContent);
+      return {
+        w: window.innerWidth,
+        rows: Math.round(tbR.height) > 46 ? 2 : 1,
+        tbH: Math.round(tbR.height),
+        n: btns.length,
+        lastText: last.textContent,
+        lastVisible: lastR.right <= tbR.right + 1 && lastR.width > 20,
+        clipped,
+        segScroll: seg.scrollWidth - seg.clientWidth,
+        // 第二行必须整体在工具栏内（不能溢出到表格上）
+        inside: segR.bottom <= tbR.bottom + 1,
+      };
+    `);
+  };
+
+  for (const w of [1600, 1200, 1000, 820]) {
+    const r = await check(w);
+    assertEq(r.n, 9, w + ' 下分类标签数量不对：' + r.n);
+    assert(r.lastVisible, w + ' 下最后一个标签「' + r.lastText + '」被裁掉');
+    assertEq(r.clipped.join(','), '', w + ' 下这些标签被裁：' + r.clipped.join(','));
+    assert(r.inside, w + ' 下标签条溢出工具栏（压到表格上）');
+    assertEq(r.segScroll, 0, w + ' 下标签条仍在内部横向滚动，没真正放下：' + r.segScroll);
+  }
+
+  // 窄到极限时可以滚动，但工具栏不能崩
+  const tiny = await check(560);
+  assertEq(tiny.n, 9, '窄屏下标签数量不对');
+  assert(tiny.tbH >= 70, '窄屏下工具栏高度异常：' + tiny.tbH);
+
+  await s.send('Emulation.clearDeviceMetricsOverride');
+  await new Promise((r) => setTimeout(r, 600));
+});
+
+test('数字字体：苹果风（Inter）+ 等宽对齐，彭博档回到等宽', async (s) => {
+  const r = await s.ev(`
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    document.querySelector('#tabs button[data-view="list"]').click();
+    await new Promise(r => setTimeout(r, 1200));
+    const pill = document.querySelector('#tbody-inner .row .pill');
+    const px = document.querySelector('#tbody-inner .row .px');
+    const cs = pill ? getComputedStyle(pill) : null;
+    const loaded = document.fonts ? document.fonts.check('12px Inter') : false;
+    return {
+      loaded,
+      font: cs ? cs.fontFamily : '',
+      tabular: document.body ? getComputedStyle(document.body).fontVariantNumeric : '',
+      pillText: pill ? pill.textContent : '',
+      pxFont: px ? getComputedStyle(px).fontFamily : '',
+    };
+  `);
+  assert(r.loaded, 'Inter 字体没加载（@font-face 路径或格式有问题）');
+  assert(/Inter/.test(r.font), '涨跌幅数字没用 Inter：' + r.font);
+  assert(/Inter/.test(r.pxFont), '价格数字没用 Inter：' + r.pxFont);
+  assert(r.tabular.includes('tabular-nums'), '数字没有等宽对齐：' + r.tabular);
+  assert(/%$/.test(r.pillText), '涨跌幅单元格取错了：' + r.pillText);
+
+  // 彭博档要保持等宽（终端味道）
+  const bbg = await s.ev(`
+    document.querySelector('#btn-theme').click();
+    await new Promise(r => setTimeout(r, 220));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b => b.textContent.trim() === '彭博终端').click();
+    await new Promise(r => setTimeout(r, 800));
+    const pill = document.querySelector('#tbody-inner .row .pill');
+    const font = getComputedStyle(pill).fontFamily;
+    document.querySelector('#btn-theme').click();
+    await new Promise(r => setTimeout(r, 220));
+    [...document.querySelectorAll('.popover.menu .menu-item')].find(b => b.textContent.trim() === '浅色').click();
+    await new Promise(r => setTimeout(r, 500));
+    return { font };
+  `);
+  assert(/Cascadia|Consolas|mono/i.test(bbg.font), '彭博档数字没回到等宽：' + bbg.font);
 });
 
 /* ================================================================== 执行 */

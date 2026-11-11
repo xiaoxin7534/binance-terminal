@@ -5,6 +5,12 @@ import { market, state, save, dpOf, isFav, toggleFav, sectorLabels } from '../co
 import { openMenu } from '../core/picker.js';
 import { cachedKlines } from './cell.js';
 
+/** 只有「深色」和「彭博终端」算深色；macOS 是浅色系，图表要用浅色网格 */
+function isDarkTheme() {
+  const t = document.documentElement.dataset.theme;
+  return t === 'dark' || t === 'bbg';
+}
+
 /** 迷你走势的可选窗口：都换算成「周期 + 根数」，最后一根永远贴着现在 */
 const SPARK_WINS = [
   { k: 'time', label: '分时', kind: 'intra', days: 1 },     // 今日 00:00 起，和格子里的分时同源
@@ -457,7 +463,7 @@ export class DetailPanel {
   }
 
   createChart() {
-    const dark = document.documentElement.dataset.theme !== 'light';
+    const dark = isDarkTheme();
     const W = Math.max(120, this.chartEl.clientWidth || 300);
     const H = Math.max(60, this.chartEl.clientHeight || 92);
     this.chart = LC.createChart(this.chartEl, {
@@ -950,7 +956,7 @@ export class DetailPanel {
 
   applyTheme() {
     if (!this.chart) return;
-    const dark = document.documentElement.dataset.theme !== 'light';
+    const dark = isDarkTheme();
     this.chart.applyOptions({
       layout: {
         background: { type: 'solid', color: cv('--panel') },
