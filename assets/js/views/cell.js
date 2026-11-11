@@ -372,17 +372,7 @@ export class Cell {
         barSpacing: 6,
         minBarSpacing: 0.1,      // 分时一天 1440 根要能塞进一个格子
         lockVisibleTimeRangeOnResize: true,
-        tickMarkFormatter: (time, type) => {
-          const d = new Date(time * 1000);
-          const p2 = (n) => String(n).padStart(2, '0');
-          switch (type) {
-            case 0: return String(d.getFullYear());
-            case 1: return p2(d.getMonth() + 1) + '/01';
-            case 2: return p2(d.getMonth() + 1) + '/' + p2(d.getDate());
-            case 3: return p2(d.getHours()) + ':' + p2(d.getMinutes());
-            default: return p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
-          }
-        },
+        tickMarkFormatter: (time, type) => this.tickLabel(time, type),
       },
       crosshair: {
         mode: LC.CrosshairMode.Normal,
@@ -390,7 +380,7 @@ export class Cell {
         horzLine: { color: C.cross, width: 1, style: 3, labelBackgroundColor: C.label },
       },
       handleScale: { axisPressedMouseMove: { time: true, price: false } },
-      localization: { locale: 'zh-CN' },
+      localization: { locale: 'zh-CN', timeFormatter: (t) => this.timeLabel(t) },
     });
 
     if (this.intraday) {
@@ -701,6 +691,7 @@ export class Cell {
     this.noMore = false;
     this.loadingMore = false;
     this.syncTools();
+    this.applyTimeFormat();
     // 分时和 K 线是两种图（折线 vs 蜡烛），切换时必须重建
     if (this.mounted && wasIntraday !== isIntradayIv(iv)) {
       this.unmountChart();
@@ -717,6 +708,50 @@ export class Cell {
     });
     const ivEl = this.el.querySelector('.ch-iv');
     if (ivEl) ivEl.textContent = IV_LABEL[this.interval] || this.interval;
+  }
+
+  /** 横轴刻度文案：月线只到月，周/日线到天，分钟级才带时分 */
+  tickLabel(time, type) {
+    const d = new Date(time * 1000);
+    const p2 = (n) => String(n).padStart(2, '0');
+    const iv = this.interval;
+    if (iv === '1M') {
+      // 跨年处给年份，其余给月份：只有 "1月 4月 7月 10月" 这种刻度才读得懂
+      return type === 0 ? String(d.getFullYear()) : `${p2(d.getMonth() + 1)}月`;
+    }
+    if (iv === '1w' || iv === '1d') {
+      return type === 0 ? String(d.getFullYear()) : `${p2(d.getMonth() + 1)}/${p2(d.getDate())}`;
+    }
+    switch (type) {
+      case 0: return String(d.getFullYear());
+      case 1: return p2(d.getMonth() + 1) + '/01';
+      case 2: return p2(d.getMonth() + 1) + '/' + p2(d.getDate());
+      case 3: return p2(d.getHours()) + ':' + p2(d.getMinutes());
+      default: return p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+    }
+  }
+
+  /** 十字光标的竖线标签：月线不要出现 "02/23 23:00" 这种 */
+  timeLabel(t) {
+    const d = new Date(t * 1000);
+    const p2 = (n) => String(n).padStart(2, '0');
+    const iv = this.interval;
+    if (iv === '1M') return `${d.getFullYear()}/${p2(d.getMonth() + 1)}`;
+    if (iv === '1w' || iv === '1d') {
+      return `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())}`;
+    }
+    return `${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+  }
+
+  /** 切换周期后重设时间文案（刻度 + 十字光标标签） */
+  applyTimeFormat() {
+    if (!this.chart || this.intraday) return;
+    try {
+      this.chart.applyOptions({
+        localization: { locale: 'zh-CN', timeFormatter: (t) => this.timeLabel(t) },
+        timeScale: { tickMarkFormatter: (time, type) => this.tickLabel(time, type) },
+      });
+    } catch (e) { /* ignore */ }
   }
 
   applyPriceFormat() {
@@ -924,7 +959,10 @@ export class Cell {
       // 每个币的 K 线根数不一样（新币、停更的币更少），按各自的 n 算出来的
       // barSpacing 就不同 → 时间轴比例不同 → 多个格子横向错位。
       // 数据不足的格子会左边留白，但至少和别的格子对得齐。
-      const target = BAR_LIMIT;
+      // 大图是单图，不需要和别的格子对齐，按**实际根数**铺满整宽；
+      // 格子墙要横向对齐，仍按固定的 BAR_LIMIT 算（否则每个币根数不同，时间轴会错位）。
+      // 不区分的话，月线只有 ~112 根时会全挤在右边、左边留一大片空白。
+      const target = this.detached ? Math.max(n, 24) : BAR_LIMIT;
       const spacing = Math.max(2.6, Math.min(14, paneW / (target + 2)));
       // 右侧收边要留出半个刻度标签的宽度：rightOffset=1 时最后一根几乎贴住价格轴，
       // 横轴最后一个 "17:00" 会被切掉半边，显示成 "17:0("。约 16px 刚好够。

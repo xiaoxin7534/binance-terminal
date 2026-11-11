@@ -2479,6 +2479,113 @@ test('数字字体：苹果风（Inter）+ 等宽对齐，彭博档回到等宽'
   assert(/Cascadia|Consolas|mono/i.test(bbg.font), '彭博档数字没回到等宽：' + bbg.font);
 });
 
+test('月线：取到的是月线不是分钟线，横轴按月显示', async (s) => {
+  // 1) 接口层：这条直接守住「磁盘缓存文件名大小写不敏感导致 1m/1M 串档」
+  const api = await s.ev(`
+    const j = await (await fetch('/api/klines?symbol=BTCUSDT%40f&interval=1M&limit=36')).json();
+    const k = j.k || [];
+    const gaps = [];
+    for (let i = 1; i < k.length; i++) gaps.push((k[i][0] - k[i - 1][0]) / 86400000);
+    gaps.sort((a, b) => a - b);
+    const m = await (await fetch('/api/klines?symbol=BTCUSDT%40f&interval=1m&limit=10')).json();
+    const mk = m.k || [];
+    const mg = mk.length > 1 ? (mk[mk.length - 1][0] - mk[0][0]) / (mk.length - 1) / 60000 : 0;
+    return {
+      n: k.length,
+      med: gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0,
+      minGap: gaps[0] || 0,
+      first: k.length ? new Date(k[0][0]).toISOString().slice(0, 10) : null,
+      last: k.length ? new Date(k[k.length - 1][0]).toISOString().slice(0, 10) : null,
+      minSpacing: mg,
+    };
+  `);
+  assert(api.n >= 12, '月线根数太少：' + api.n);
+  assert(api.med >= 28 && api.med <= 31.5, `月线间距应为 28~31 天，实际 ${api.med} 天`);
+  assert(api.minGap >= 27, `月线里混进了更短的 K 线（最小间距 ${api.minGap} 天）——缓存串档了`);
+  assert(/^\d{4}-\d{2}-01$/.test(api.first), '月线起点不是月初：' + api.first);
+  assert(/^\d{4}-\d{2}-01$/.test(api.last), '月线终点不是月初：' + api.last);
+  // 顺带确认 1m 没被这次改动带坏
+  assert(api.minSpacing > 0.9 && api.minSpacing < 1.1, `1m 间距异常：${api.minSpacing} 分钟`);
+
+  // 2) UI：切到月线，K 线要铺满宽度、时间文案只到月
+  const ui = await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r => setTimeout(r, 400));
+    document.querySelector('#grid .cell').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 2200));
+    const b = window.__term.big;
+    document.querySelector('#bc-iv button[data-iv="1M"]').click();
+    for (let i = 0; i < 200; i++) {
+      const c = b.cell;
+      if (c && c.loadedKey === b.symbol + '|1M' && c.bars.length > 10) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    await new Promise(r => setTimeout(r, 900));
+    const c = b.cell;
+    const ts = c.chart.timeScale();
+    const opts = ts.options();
+    const paneW = Math.max(80, c.host.clientWidth - 62);
+    const filled = opts.barSpacing * c.bars.length / paneW;
+    // 横轴刻度文案：不该出现 "23:00" 这种
+    const ticks = [...document.querySelectorAll('#bigchart canvas')].length;
+    return {
+      bars: c.bars.length,
+      first: new Date(c.times[0] * 1000).toISOString().slice(0, 10),
+      last: new Date(c.times[c.times.length - 1] * 1000).toISOString().slice(0, 10),
+      legend: b.infoEl.textContent.replace(/\\s+/g, ' ').trim(),
+      spacing: opts.barSpacing,
+      filled,
+      canTick: typeof opts.tickMarkFormatter,
+      canvas: ticks,
+    };
+  `);
+  assert(ui.bars >= 20 && ui.bars <= 400, '大图月线根数异常：' + ui.bars);
+  assert(/^\d{4}-\d{2}-01$/.test(ui.first), '大图月线起点不是月初：' + ui.first);
+  // 顶部明细行：只有年月，不带时分
+  assert(/^\d{4}-\d{2}\s/.test(ui.legend), '月线明细行时间格式不对：' + ui.legend.slice(0, 30));
+  assert(!/\d{2}:\d{2}/.test(ui.legend.split('开')[0]), '月线明细行还带着时分：' + ui.legend.slice(0, 30));
+  // K 线要铺满宽度（以前按 1000 根算间距，月线会全挤到右边）
+  assert(ui.filled > 0.75, `月线只占了 ${(ui.filled * 100).toFixed(0)}% 宽度，左侧留白过多`);
+  assert(ui.canvas > 0, '月线下没有画布');
+
+  // 3) 悬停：信息卡表头应是「年/月 + 月线」
+  const box = await s.ev(`
+    const c = window.__term.big.cell;
+    const r = c.host.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width * 0.6), y: Math.round(r.top + r.height * 0.35) };
+  `);
+  await s.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y, buttons: 0 });
+  await new Promise((r) => setTimeout(r, 500));
+  const tip = await s.ev(`
+    const t = document.querySelector('.bc-tip');
+    return { hidden: t.hidden, head: t.querySelector('.bt-head') ? t.querySelector('.bt-head').textContent.trim() : '' };
+  `);
+  assert(!tip.hidden, '月线悬停时信息卡没出现');
+  assert(/^\d{4}\/\d{2}月线$/.test(tip.head), '月线信息卡表头不对：' + tip.head);
+
+  // 4) 切回日线，确认没把别的周期带坏
+  const back = await s.ev(`
+    const b = window.__term.big;
+    document.querySelector('#bc-iv button[data-iv="1d"]').click();
+    for (let i = 0; i < 200; i++) {
+      const c = b.cell;
+      if (c && c.loadedKey === b.symbol + '|1d' && c.bars.length > 10) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    await new Promise(r => setTimeout(r, 700));
+    const c = b.cell;
+    const gaps = [];
+    for (let i = Math.max(1, c.bars.length - 10); i < c.bars.length; i++) gaps.push((c.bars[i][0] - c.bars[i - 1][0]) / 86400000);
+    gaps.sort((a, b2) => a - b2);
+    return { med: gaps[Math.floor(gaps.length / 2)] || 0,
+             legend: b.infoEl.textContent.replace(/\\s+/g, ' ').trim().slice(0, 20) };
+  `);
+  assert(back.med >= 1 && back.med <= 3.2, `日线间距异常：${back.med} 天`);
+  assert(/^\d{4}-\d{2}-\d{2}\s/.test(back.legend), '日线明细行格式不对：' + back.legend);
+
+  await s.ev(`window.__term.big.close(); await new Promise(r => setTimeout(r, 400)); return 1;`);
+});
+
 /* ================================================================== 执行 */
 const server = await checkServer();
 const bin = findChrome();

@@ -1327,6 +1327,17 @@ export class BigChart {
     this.chgEl.className = 'bc-chg ' + cls;
   }
 
+  /** 这根 K 线的时间标签：月线只到月，周线/日线到天，其余到分钟 */
+  barTimeLabel(t) {
+    const d = new Date(t * 1000);
+    const y = d.getFullYear();
+    const m = pad2(d.getMonth() + 1);
+    const dd = pad2(d.getDate());
+    if (this.interval === '1M') return `${y}-${m}`;
+    if (this.interval === '1w' || this.interval === '1d') return `${y}-${m}-${dd}`;
+    return `${y}-${m}-${dd} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+
   /** 十字光标信息卡：像终端那样把这一根 K 线的明细列成表 */
   showTip(idx, point) {
     const el = this.tipEl;
@@ -1340,9 +1351,13 @@ export class BigChart {
     const i = Math.max(0, Math.min(c.times.length - 1, idx));
     const d = new Date(c.times[i] * 1000);
     const dp = dpOf(this.symbol);
-    const day = `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
-    const wd = '星期' + '日一二三四五六'[d.getDay()];
-    const head = `<div class="bt-head"><span>${day}</span><span>${wd}</span></div>`;
+    const y = d.getFullYear();
+    const mo = pad2(d.getMonth() + 1);
+    const dd = pad2(d.getDate());
+    // 月线说"星期几"没有意义，改成标出这是月线；周线仍给日期 + 星期（开盘那天）
+    const head = this.interval === '1M'
+      ? `<div class="bt-head"><span>${y}/${mo}</span><span>月线</span></div>`
+      : `<div class="bt-head"><span>${y}/${mo}/${dd}</span><span>星期${'日一二三四五六'[d.getDay()]}</span></div>`;
 
     let rows = '';
     const row = (k, v, cls) => {
@@ -1418,9 +1433,7 @@ export class BigChart {
     const i = Math.max(0, Math.min(c.times.length - 1, idx));
     const t = c.times[i];
     const dp = dpOf(this.symbol);
-    const d = new Date(t * 1000);
-    const day = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-    const time = this.interval === '1d' ? day : `${day} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    const time = this.barTimeLabel(t);
 
     if (c.intraday) {
       const px = c.closes[i];

@@ -1960,6 +1960,8 @@ def get_klines_before(perp, sym, iv, limit, before):
         ent = KLINES.get(key)
     if ent is None:
         ent = _read_disk(key)
+        if ent and not _bars_match_iv(ent.get("bars"), iv):
+            ent = None
         if ent:
             with _klines_lock:
                 KLINES[key] = ent
@@ -2003,9 +2005,16 @@ def get_klines(perp, sym, iv, limit, prefetch=False, bg=False):
     ttl = max(KLINE_TTL, min(300.0, step / 2000.0))
     with _klines_lock:
         ent = KLINES.get(key)
+    if ent is not None and not _bars_match_iv(ent.get("bars"), iv):
+        # 串档了（例如 1m 的缓存被当成 1M 用），直接丢弃重拉
+        with _klines_lock:
+            KLINES.pop(key, None)
+        ent = None
     if ent is None:
         # 内存里没有，先看看磁盘上有没有（重启后第一件事就是这个）
         ent = _read_disk(key)
+        if ent and not _bars_match_iv(ent.get("bars"), iv):
+            ent = None
         if ent:
             with _klines_lock:
                 KLINES[key] = ent
@@ -2174,9 +2183,38 @@ def prefetch_klines():
 
 
 def _kfile(key):
-    """key 形如 s:BTCUSDT|1m / f:BTCUSDT@1m，转成安全文件名"""
+    """key 形如 s:BTCUSDT|1m / f:BTCUSDT|1M，转成安全文件名。
+
+    Windows / macOS 的文件系统**大小写不敏感**：直接拼出来的
+    `f_BTCUSDT_1M.json` 和 `f_BTCUSDT_1m.json` 是同一个文件，
+    月线就会读到分钟线的缓存（症状：月线画出 1000 根 1 分钟 K 线）。
+    所以把周期里的大写字母转义掉：1M → 1%4DM，小写周期名保持不变（老缓存仍可用）。
+    """
+    base, sep, iv = key.rpartition("|")
+    if sep:
+        iv = "".join("%%%02X" % ord(c) if c.isupper() else c for c in iv)
+        key = base + "|" + iv
     name = key.replace(":", "_").replace("|", "_").replace("@", "_")
     return os.path.join(KLINES_DIR, name + ".json")
+
+
+def _bars_match_iv(bars, iv):
+    """缓存里的 K 线间距是否和周期对得上。
+
+    防的是"串档"：磁盘缓存文件名曾经在 Windows 上大小写不敏感，
+    1m 和 1M 共用一个文件，月线会读到分钟线。这里按中位间距再挡一层，
+    以后再出现别的命名冲突也不会把错误的 K 线喂给前端。
+    """
+    step = IV_MS.get(iv)
+    if not step or not bars or len(bars) < 3:
+        return True
+    tail = bars[-60:]
+    gaps = sorted(tail[i + 1][0] - tail[i][0] for i in range(len(tail) - 1))
+    med = gaps[len(gaps) // 2]
+    if med <= 0:
+        return False
+    # 月线实际间距 28~31 天，日线有周末缺口，放宽到 0.5~2 倍
+    return 0.5 <= (med / step) <= 2.0
 
 
 def _read_disk(key):
