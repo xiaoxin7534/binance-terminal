@@ -508,9 +508,11 @@ button { cursor: pointer; border: none; background: none; padding: 0; }
   flex: 1;
   min-height: 0;
   display: grid;
-  gap: 1px;
-  background: var(--border);
-  padding: 1px;
+  /* 1px 分隔线会让 8 格墙糊成一整块；改成 4px 留白 + 页面底色，
+     每格像一个独立卡片，边界清楚也不那么拥挤 */
+  gap: 4px;
+  background: var(--bg);
+  padding: 4px;
   /* 窗口不够高时不再把格子压扁，改为纵向滚动 */
   overflow-y: auto;
   overflow-x: hidden;

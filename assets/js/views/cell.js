@@ -761,6 +761,15 @@ export class Cell {
         priceFormat: { type: 'price', precision: dp, minMove: Math.pow(10, -dp) },
       });
     }
+    this.applyPriceMode();
+  }
+
+  /** 价格轴：普通 / 对数（mode 1）。对数坐标下同样的百分比涨跌看起来一样高 */
+  applyPriceMode() {
+    if (!this.chart) return;
+    try {
+      this.chart.priceScale('right').applyOptions({ mode: state.logScale ? 1 : 0 });
+    } catch (e) { /* ignore */ }
   }
 
   /** 把一批 K 线灌进图表 */
@@ -963,7 +972,11 @@ export class Cell {
       // 格子墙要横向对齐，仍按固定的 BAR_LIMIT 算（否则每个币根数不同，时间轴会错位）。
       // 不区分的话，月线只有 ~112 根时会全挤在右边、左边留一大片空白。
       const target = this.detached ? Math.max(n, 24) : BAR_LIMIT;
-      const spacing = Math.max(2.6, Math.min(14, paneW / (target + 2)));
+      // 格子墙的蜡烛最小间距给到 3.6px：4 列布局时每格只有 ~270px，
+      // 2.6px 的间距会让 77 根蜡烛糊成一片（用户反馈"太拥挤"）。
+      // 3.6px 下每格约 55~60 根，和主流多图看盘软件一个观感。
+      const minSp = this.detached ? 2.6 : 3.6;
+      const spacing = Math.max(minSp, Math.min(14, paneW / (target + 2)));
       // 右侧收边要留出半个刻度标签的宽度：rightOffset=1 时最后一根几乎贴住价格轴，
       // 横轴最后一个 "17:00" 会被切掉半边，显示成 "17:0("。约 16px 刚好够。
       const rightOffset = Math.max(1, Math.round(16 / spacing));

@@ -33,6 +33,7 @@ const DEFAULTS = {
   rows: 0,             // 0=跟随布局行数，N=固定 N 行，-1=铺满当前筛选的全部品种
   interval: '1m',
   bcInterval: '1d',     // 大图自己的周期（默认日线，和格子墙的周期分开记）
+  logScale: false,      // 价格轴用对数坐标（看长期涨跌幅更公平）
   sparkWin: 'time',     // 迷你走势的窗口：time(分时) / 5d / 1d / 1w / 1m
   sparkH: 84,           // 迷你走势的高度（可拖拽调整，默认 84）
   indicators: { ma: true, vol: true, macd: true, boll: false },
@@ -147,7 +148,7 @@ export function save() {
         view: state.view, theme: state.theme, font: state.font,
         watchOpen: state.watchOpen,
         layout: state.layout, rows: state.rows,
-        interval: state.interval, bcInterval: state.bcInterval,
+        interval: state.interval, bcInterval: state.bcInterval, logScale: state.logScale,
         sparkWin: state.sparkWin, sparkH: state.sparkH,
         indicators: state.indicators,
         indParams: state.indParams,

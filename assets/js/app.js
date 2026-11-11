@@ -75,6 +75,19 @@ function applyTheme(theme, persist = true) {
   if (tb) tb.title = `切换配色（当前：${THEME_NAMES[theme] || theme}，T）`;
 }
 
+/* --------------------------------------------------------------- 价格轴模式 */
+/** 对数坐标：所有图表一起切（墙上的格子 + 大图） */
+function applyLogScale(on, persist = true) {
+  state.logScale = !!on;
+  if (persist) save();
+  for (const sel of ['#log-btn', '#bc-log-btn']) {
+    const b = document.querySelector(sel);
+    if (b) b.classList.toggle('on', state.logScale);
+  }
+  if (grid) for (const c of grid.cells) if (c.applyPriceMode) c.applyPriceMode();
+  if (big && big.cell && big.cell.applyPriceMode) big.cell.applyPriceMode();
+}
+
 /* --------------------------------------------------------------- 界面字体 */
 const FONT_LABELS = {
   pingfang: '苹方 PingFang',
@@ -681,6 +694,10 @@ function bindToolbar() {
   });
 
   // 配色：点开菜单直接选名字（原来只能盲点循环，三档里第三档没人会发现）
+  $('#log-btn').addEventListener('click', () => applyLogScale(!state.logScale));
+  const bcLog = $('#bc-log-btn');
+  if (bcLog) bcLog.addEventListener('click', () => applyLogScale(!state.logScale));
+
   $('#btn-theme').addEventListener('click', () => {
     const items = THEMES.map((k) => ({ key: k, label: THEME_NAMES[k] }));
     openMenu($('#btn-theme'), items, state.theme, (k) => applyTheme(k));
@@ -812,6 +829,7 @@ async function refreshMarket() {
 
 async function boot() {
   applyTheme(state.theme, false);
+  applyLogScale(state.logScale, false);
   // 换了机器 / 首次运行：选中的字体不存在就落到雅黑，
   // 免得菜单里勾着「苹方（未安装）」而屏幕上是别的字体
   if (state.font === 'pingfang' && !hasFont('PingFang SC')) state.font = 'yahei';
@@ -1041,6 +1059,7 @@ document.addEventListener('keydown', (e) => {
   // 大图模式下先交给它自己处理，其余全局快捷键一律让路
   if (big && big.isOpen()) {
     if (e.key === 't' || e.key === 'T') { applyTheme(nextTheme(state.theme)); return; }
+    if (e.key === 'l' || e.key === 'L') { applyLogScale(!state.logScale); return; }
     if (big.onKey(e)) return;
     return;
   }
@@ -1064,6 +1083,7 @@ document.addEventListener('keydown', (e) => {
     if (state.view === 'grid' && !e.metaKey && !e.ctrlKey) setGridDetail(!state.detailOpen);
   }
   else if (e.key === 't' || e.key === 'T') applyTheme(nextTheme(state.theme));
+  else if (e.key === 'l' || e.key === 'L') applyLogScale(!state.logScale);
   else if (e.key === '/') {
     e.preventDefault();
     switchView('list');

@@ -2586,6 +2586,102 @@ test('月线：取到的是月线不是分钟线，横轴按月显示', async (s
   await s.ev(`window.__term.big.close(); await new Promise(r => setTimeout(r, 400)); return 1;`);
 });
 
+test('对数坐标：一键切换，墙上与大图同步，落盘', async (s) => {
+  const r = await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r => setTimeout(r, 600));
+    const cells = window.__term.grid.cells.filter(c => c.mounted && c.chart);
+    const before = cells.map(c => c.chart.priceScale('right').options().mode);
+    const btn0 = document.querySelector('#log-btn').classList.contains('on');
+    document.querySelector('#log-btn').click();
+    await new Promise(r => setTimeout(r, 700));
+    const after = cells.map(c => c.chart.priceScale('right').options().mode);
+    return {
+      n: cells.length, before, after, btn0,
+      btnOn: document.querySelector('#log-btn').classList.contains('on'),
+      state: window.__term.state.logScale,
+      saved: JSON.parse(localStorage.getItem('binance-terminal.v1') || '{}').logScale,
+    };
+  `);
+  assert(r.n > 0, '没有已挂载的格子');
+  assertEq(r.btn0, false, '默认不该是对数');
+  assert(r.before.every((m) => m === 0), '默认价格轴不是普通坐标：' + r.before.join(','));
+  assert(r.after.every((m) => m === 1), '切换后不是所有格子都变对数：' + r.after.join(','));
+  assertEq(r.btnOn, true, '按钮没高亮');
+  assertEq(r.state, true, 'state.logScale 没变');
+  assertEq(r.saved, true, '对数开关没写进 localStorage');
+
+  // 大图要继承，并且大图工具栏那个按钮也能切
+  const big = await s.ev(`
+    document.querySelector('#grid .cell').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 2600));
+    const b = window.__term.big;
+    const openMode = b.cell.chart.priceScale('right').options().mode;
+    const btnOn = document.querySelector('#bc-log-btn').classList.contains('on');
+    document.querySelector('#bc-log-btn').click();
+    await new Promise(r => setTimeout(r, 500));
+    const afterToggle = b.cell.chart.priceScale('right').options().mode;
+    const gridMode = window.__term.grid.cells.filter(c => c.mounted && c.chart)
+      .map(c => c.chart.priceScale('right').options().mode);
+    return { openMode, btnOn, afterToggle, gridMode, state: window.__term.state.logScale };
+  `);
+  assertEq(big.openMode, 1, '大图没继承对数坐标：' + big.openMode);
+  assertEq(big.btnOn, true, '大图的对数按钮没高亮');
+  assertEq(big.afterToggle, 0, '大图按钮没切回普通坐标');
+  assert(big.gridMode.every((m) => m === 0), '大图切换没有同步到格子墙：' + big.gridMode.join(','));
+  assertEq(big.state, false, '大图切换没写回 state');
+
+  // 快捷键 L
+  const hot = await s.ev(`
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true }));
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true }));
+    await new Promise(r => setTimeout(r, 500));
+    const on = window.__term.state.logScale;
+    const modes = window.__term.grid.cells.filter(c => c.mounted && c.chart)
+      .map(c => c.chart.priceScale('right').options().mode);
+    return { on, modes };
+  `);
+  assertEq(hot.on, true, '快捷键 L 没打开对数');
+  assert(hot.modes.every((m) => m === 1), '快捷键没作用到格子：' + hot.modes.join(','));
+
+  // 收尾：关大图、恢复普通坐标
+  await s.ev(`
+    if (window.__term.state.logScale) document.querySelector('#log-btn').click();
+    window.__term.big.close();
+    await new Promise(r => setTimeout(r, 500));
+    return 1;
+  `);
+  const back = await s.ev('return window.__term.state.logScale;');
+  assertEq(back, false, '收尾没恢复普通坐标');
+});
+
+test('格子墙密度：蜡烛间距够宽、格子之间有留白', async (s) => {
+  const r = await s.ev(`
+    document.querySelector('#tabs button[data-view="grid"]').click();
+    await new Promise(r => setTimeout(r, 900));
+    const cells = window.__term.grid.cells.filter(c => c.mounted && c.chart);
+    const c0 = cells[0];
+    const ts = c0.chart.timeScale();
+    const opts = ts.options();
+    const vis = ts.getVisibleLogicalRange();
+    const grid = getComputedStyle(document.querySelector('#grid'));
+    const cell = c0.el.getBoundingClientRect();
+    return {
+      n: cells.length,
+      spacing: opts.barSpacing,
+      visible: vis ? Math.round(vis.to - vis.from) : null,
+      gap: grid.gap,
+      pad: grid.paddingTop,
+      cellW: Math.round(cell.width),
+    };
+  `);
+  assert(r.n > 0, '没有已挂载的格子');
+  assert(r.spacing >= 3.4, `格子墙蜡烛间距只有 ${r.spacing.toFixed(2)}px（应 ≥3.4，太密）`);
+  assert(r.visible > 20 && r.visible <= 75, `每格可见根数 ${r.visible} 不合适（应 20~75）`);
+  assertEq(r.gap, '4px', '格子之间没有留白：' + r.gap);
+  assertEq(r.pad, '4px', '格子墙没有内边距：' + r.pad);
+});
+
 /* ================================================================== 执行 */
 const server = await checkServer();
 const bin = findChrome();
