@@ -2682,6 +2682,59 @@ test('格子墙密度：蜡烛间距够宽、格子之间有留白', async (s) =
   assertEq(r.pad, '4px', '格子墙没有内边距：' + r.pad);
 });
 
+test('自选栏：只显示自选，热门榜已移除', async (s) => {
+  const r = await s.ev(`
+    const w = document.querySelector('#watch');
+    if (w.classList.contains('hidden')) document.querySelector('#btn-watch').click();
+    await new Promise(r => setTimeout(r, 500));
+    const list = document.querySelector('#watch-list');
+    const rows = [...list.querySelectorAll('[data-s]')].map(el => el.dataset.s);
+    const favs = window.__term.state.favs.slice();
+    const inMarket = favs.filter(s2 => window.__term.market.has(s2));
+    return {
+      text: list.textContent.replace(/\\s+/g, ' ').trim(),
+      groups: [...list.querySelectorAll('.w-group')].map(g => g.textContent.replace(/\\s+/g, ' ').trim()),
+      rows, favs, inMarket,
+      rowCount: rows.length,
+    };
+  `);
+  assert(!/热门/.test(r.text), '自选栏里还残留「热门」：' + r.text.slice(0, 60));
+  assertEq(r.groups.length, 1, '自选栏应当只有一组（自选），实际：' + r.groups.join(' | '));
+  assertEq(r.rowCount, r.inMarket.length, `渲染行数 ${r.rowCount} 与自选数 ${r.inMarket.length} 不一致`);
+  // 每一行都必须是自选里的品种（不能混进热门补位的代码）
+  const extra = r.rows.filter((x) => !r.favs.includes(x));
+  assertEq(extra.join(','), '', '自选栏里混进了非自选品种：' + extra.join(','));
+
+  // 清空后应当给出「怎么添加」的提示，而不是引导去热门
+  const empty = await s.ev(`
+    const list = document.querySelector('#watch-list');
+    const clr = list.querySelector('[data-clear]');
+    if (clr) clr.click();
+    await new Promise(r => setTimeout(r, 500));
+    const box = list.querySelector('.w-empty');
+    const txt = box ? box.textContent.replace(/\\s+/g, ' ').trim() : '';
+    const rows = list.querySelectorAll('[data-s]').length;
+    return { txt, rows };
+  `);
+  assert(empty.rows === 0, '清空后还有 ' + empty.rows + ' 行');
+  assert(empty.txt.length > 0, '清空后没有空状态提示');
+  assert(!/热门/.test(empty.txt), '空状态还在引导去热门：' + empty.txt);
+  assert(/添加/.test(empty.txt), '空状态没告诉用户怎么添加：' + empty.txt);
+
+  // 撤销恢复，别把用例状态留给后面
+  await s.ev(`
+    const t = document.querySelector('.toast .toast-act');
+    if (t) t.click();
+    await new Promise(r => setTimeout(r, 500));
+    return 1;
+  `);
+  const back = await s.ev(`
+    return { rows: document.querySelectorAll('#watch-list [data-s]').length,
+             favs: window.__term.state.favs.length };
+  `);
+  assert(back.rows > 0, '撤销后自选没恢复');
+});
+
 /* ================================================================== 执行 */
 const server = await checkServer();
 const bin = findChrome();

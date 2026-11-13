@@ -1,4 +1,4 @@
-/* 左侧自选栏：自选 + 热门，点一下就把行情拉到主视图 */
+/* 左侧自选栏：只放自选（热门榜已移除），点一下就把行情拉到主视图 */
 
 import {
   market, state, isFav, toggleFav, clearFavs, setFavs, dpOf,
@@ -7,7 +7,6 @@ import {
 import { fmtPrice, fmtPct, dirClass, symLabel } from '../core/fmt.js';
 import { openPicker, openMenu, openPrompt } from '../core/picker.js';
 
-const HOT_N = 14;
 
 export class WatchView {
   constructor(root, ctx) {
@@ -118,19 +117,6 @@ export class WatchView {
     });
   }
 
-  /** 自选在前，热门补位（同币种的现货/永续只留一个，避免 BTC 出现两遍） */
-  buildGroups() {
-    const favs = state.favs.filter((s) => market.has(s));
-    const favSet = new Set(favs);
-    const favBases = new Set(favs.map((s) => (market.get(s) || {}).b).filter(Boolean));
-    const hot = [...market.values()]
-      .filter((r) => !favSet.has(r.s) && !favBases.has(r.b))
-      .sort((a, b) => b.qv - a.qv)
-      .slice(0, HOT_N)
-      .map((r) => r.s);
-    return { favs, hot };
-  }
-
   rowHtml(sym) {
     const r = market.get(sym);
     if (!r) return '';
@@ -146,7 +132,7 @@ export class WatchView {
   }
 
   render() {
-    const { favs, hot } = this.buildGroups();
+    const favs = state.favs.filter((s) => market.has(s));
     const parts = [];
     const g = currentFavGroup();
     parts.push(`<div class="w-group"><button class="w-gname" data-gmenu title="切换 / 管理自选分组">`
@@ -154,13 +140,9 @@ export class WatchView {
       + (favs.length ? '<button class="w-clear" data-clear title="清空当前分组（可撤销）">清空</button>' : '')
       + '</div>');
     if (!favs.length) {
-      parts.push('<div class="w-empty">还没有自选，点右上角 + 添加<br>或直接双击热门里的代码</div>');
+      parts.push('<div class="w-empty">还没有自选<br>点右上角 + 搜索添加，或在行情列表右键「加入自选」</div>');
     } else {
       parts.push(favs.map((s) => this.rowHtml(s)).join(''));
-    }
-    if (hot.length) {
-      parts.push(`<div class="w-group">热门<span class="n">按成交额</span></div>`);
-      parts.push(hot.map((s) => this.rowHtml(s)).join(''));
     }
     this.listEl.innerHTML = parts.join('');
     this.refs.clear();
